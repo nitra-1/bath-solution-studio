@@ -161,3 +161,5 @@ pre.log{white-space:pre-wrap;font-family:var(--mono);font-size:12px;max-height:2
 .dirty{box-shadow:inset 3px 0 0 var(--accent)}
 .confirm{color:var(--warn)!important;border-color:var(--warn)!important}
 .saved{font-size:12px;color:var(--sub)}
+.grouphead{font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--sub);padding:12px 0 2px;border-bottom:1px solid var(--line)}
+.cathead.small{margin-top:10px;gap:10px;font-size:13px}

@@ -77,37 +77,53 @@
       if (proj.notes) s.addText([{ text: 'Requirement notes  ', options: { bold: true, color: C.accent } }, { text: proj.notes }], { x: 0.5, y: 5.6, w: W - 1, h: 1.1, fontFace: FONT, fontSize: 11, color: C.sub, valign: 'top', margin: 0 });
       footer(s, foot, n++);
     }
-    // Room slides
+    // Room slides: main products first, then accessories, each on their own slide(s)
+    const groupOf = proj.groupOf || (() => '');
+    const splitByGroup = items => {
+      const out = [];
+      items.forEach(i => { const g = groupOf(i.category); let e = out.find(x => x.group === g); if (!e) out.push(e = { group: g, items: [] }); e.items.push(i); });
+      return out;
+    };
     proj.rooms.forEach(r => {
       const per = 8;
-      for (let p = 0; p < Math.max(1, Math.ceil(r.items.length / per)); p++) {
-        const s = pptx.addSlide();
-        const chunk = r.items.slice(p * per, p * per + per);
-        header(s, `${r.brand} ${r.series}  ·  ${r.finishLabel}`, r.name + (p ? ' (continued)' : ''), r.brief || '');
-        const cw = 2.95, ch = 2.62, gx = 0.17, gy = 0.2, x0 = 0.5, y0 = 1.55;
-        chunk.forEach((it, i) => {
-          const cx = x0 + (i % 4) * (cw + gx), cy = y0 + Math.floor(i / 4) * (ch + gy);
-          s.addShape('rect', { x: cx, y: cy, w: cw, h: ch, fill: { color: C.white }, line: { color: C.line, width: 0.75 } });
-          s.addShape('rect', { x: cx, y: cy, w: cw, h: 1.25, fill: { color: C.mist }, line: { color: C.mist } });
-          pic(s, img(it.image), { x: cx + 0.6, y: cy + 0.08, w: cw - 1.2, h: 1.09, sizing: { type: 'contain', w: cw - 1.2, h: 1.09 } });
-          if (it.qty > 1) s.addText('×' + it.qty, { x: cx + cw - 0.62, y: cy + 0.08, w: 0.52, h: 0.28, fontFace: FONT, fontSize: 10, bold: true, color: C.white, fill: { color: C.accent }, align: 'center', margin: 0 });
-          s.addText([
-            { text: it.name, options: { fontSize: 11, bold: true, color: C.ink, breakLine: true } },
-            { text: it.art + '  ·  ' + it.finish, options: { fontSize: 9, color: C.sub, breakLine: true } },
-            { text: it.why || '', options: { fontSize: 9, italic: true, color: C.accent } }
-          ], { x: cx + 0.12, y: cy + 1.32, w: cw - 0.24, h: 0.95, fontFace: FONT, valign: 'top', margin: 0, paraSpaceAfter: 2 });
-          s.addText(money(it.qty * it.price), { x: cx + 0.12, y: cy + ch - 0.36, w: cw - 0.24, h: 0.28, fontFace: FONT, fontSize: 11, bold: true, color: C.ink, align: 'right', margin: 0 });
-        });
-        const t = r.items.reduce((a, i) => a + i.qty * i.price, 0);
-        s.addText(`Room subtotal  ${money(t)}`, { x: W - 4.5, y: 0.3, w: 4, h: 0.3, fontFace: FONT, fontSize: 11, bold: true, color: C.ink, align: 'right', margin: 0 });
-        footer(s, foot, n++);
-      }
+      const parts = splitByGroup(r.items);
+      if (!parts.length) parts.push({ group: '', items: [] });
+      const t = r.items.reduce((a, i) => a + i.qty * i.price, 0);
+      parts.forEach(part => {
+        const pages = Math.max(1, Math.ceil(part.items.length / per));
+        for (let p = 0; p < pages; p++) {
+          const s = pptx.addSlide();
+          const chunk = part.items.slice(p * per, p * per + per);
+          const title = r.name + (part.group && parts.length > 1 ? `  ·  ${part.group}` : '') + (p ? ' (continued)' : '');
+          header(s, `${r.brand} ${r.series}  ·  ${r.finishLabel}`, title, part === parts[0] && !p ? (r.brief || '') : '');
+          const cw = 2.95, ch = 2.62, gx = 0.17, gy = 0.2, x0 = 0.5, y0 = 1.55;
+          chunk.forEach((it, i) => {
+            const cx = x0 + (i % 4) * (cw + gx), cy = y0 + Math.floor(i / 4) * (ch + gy);
+            s.addShape('rect', { x: cx, y: cy, w: cw, h: ch, fill: { color: C.white }, line: { color: C.line, width: 0.75 } });
+            s.addShape('rect', { x: cx, y: cy, w: cw, h: 1.25, fill: { color: C.mist }, line: { color: C.mist } });
+            pic(s, img(it.image), { x: cx + 0.6, y: cy + 0.08, w: cw - 1.2, h: 1.09, sizing: { type: 'contain', w: cw - 1.2, h: 1.09 } });
+            if (it.qty > 1) s.addText('×' + it.qty, { x: cx + cw - 0.62, y: cy + 0.08, w: 0.52, h: 0.28, fontFace: FONT, fontSize: 10, bold: true, color: C.white, fill: { color: C.accent }, align: 'center', margin: 0 });
+            s.addText([
+              { text: (it.category || '').toUpperCase(), options: { fontSize: 7.5, bold: true, color: C.accent, charSpacing: 1, breakLine: true } },
+              { text: it.name, options: { fontSize: 11, bold: true, color: C.ink, breakLine: true } },
+              { text: it.art + '  ·  ' + it.finish, options: { fontSize: 9, color: C.sub, breakLine: true } },
+              { text: it.why || '', options: { fontSize: 9, italic: true, color: C.accent } }
+            ], { x: cx + 0.12, y: cy + 1.3, w: cw - 0.24, h: 0.97, fontFace: FONT, valign: 'top', margin: 0, paraSpaceAfter: 2 });
+            s.addText(money(it.qty * it.price), { x: cx + 0.12, y: cy + ch - 0.36, w: cw - 0.24, h: 0.28, fontFace: FONT, fontSize: 11, bold: true, color: C.ink, align: 'right', margin: 0 });
+          });
+          s.addText(`Room subtotal  ${money(t)}`, { x: W - 4.5, y: 0.3, w: 4, h: 0.3, fontFace: FONT, fontSize: 11, bold: true, color: C.ink, align: 'right', margin: 0 });
+          footer(s, foot, n++);
+        }
+      });
     });
-    // Bill of quantities
+    // Bill of quantities, grouped by room, then main products / accessories
     const lines = [];
     proj.rooms.forEach(r => {
       lines.push({ room: r.name });
-      r.items.forEach(i => lines.push(i));
+      splitByGroup(r.items).forEach(part => {
+        if (part.group) lines.push({ grp: part.group });
+        part.items.forEach(i => lines.push(i));
+      });
       lines.push({ sub: r.items.reduce((a, i) => a + i.qty * i.price, 0) });
     });
     const pages = Math.ceil(lines.length / 14); const per = Math.ceil(lines.length / pages);
@@ -118,6 +134,7 @@
       const rows = [head];
       lines.slice(p * per, p * per + per).forEach(l => {
         if (l.room) rows.push([{ text: l.room, options: { bold: true, color: C.accent, colspan: 6 } }]);
+        else if (l.grp) rows.push([{ text: l.grp, options: { italic: true, color: C.sub, colspan: 6 } }]);
         else if (l.sub != null) rows.push([{ text: 'Subtotal', options: { colspan: 5, align: 'right', color: C.sub } }, { text: money(l.sub), options: { bold: true, align: 'right' } }]);
         else rows.push([l.art, l.name, l.finish, { text: String(l.qty), options: { align: 'right' } }, { text: money(l.price), options: { align: 'right' } }, { text: money(l.qty * l.price), options: { align: 'right' } }]);
       });
@@ -166,30 +183,43 @@
       d.addText(sel.brand.toUpperCase(), { x: 0.8, y: 1.6, w: 6, h: 0.35, fontFace: FONT, fontSize: 12, bold: true, color: C.accent, charSpacing: 3, margin: 0 });
       d.addText(g.series, { x: 0.8, y: 2.0, w: 6.5, h: 1.2, fontFace: HFONT, fontSize: 60, color: C.ink, margin: 0 });
       d.addText(`${g.style}  ·  ${g.products.length} products`, { x: 0.8, y: 3.25, w: 6.5, h: 0.4, fontFace: FONT, fontSize: 16, color: C.sub, margin: 0 });
-      const cats = [...new Set(g.products.map(p => p.category))];
-      d.addText(cats.join('   ·   '), { x: 0.8, y: 3.8, w: 6.5, h: 0.8, fontFace: FONT, fontSize: 12, color: C.sub, valign: 'top', margin: 0 });
+      const groupOf = sel.groupOf || (() => '');
+      const parts = [];
+      g.products.forEach(p => { const k = groupOf(p.category); let e = parts.find(x => x.group === k); if (!e) parts.push(e = { group: k, products: [] }); e.products.push(p); });
+      d.addText(parts.map(pt => ({ text: (pt.group ? pt.group + ':  ' : '') + [...new Set(pt.products.map(p => p.category))].join(' · '), options: { breakLine: true } })),
+        { x: 0.8, y: 3.8, w: 6.5, h: 1.0, fontFace: FONT, fontSize: 12, color: C.sub, valign: 'top', margin: 0, paraSpaceAfter: 4 });
       d.addText('FINISHES', { x: 0.8, y: 5.0, w: 3, h: 0.3, fontFace: FONT, fontSize: 10, bold: true, color: C.sub, charSpacing: 2, margin: 0 });
       g.finishes.forEach((f, i) => {
         const x = 0.8 + i * 1.05;
         swatch(d, f.key, x, 5.4, 0.42);
         d.addText(f.short, { x: x - 0.25, y: 5.88, w: 0.92, h: 0.4, fontFace: FONT, fontSize: 9, color: C.sub, align: 'center', margin: 0 });
       });
-      const hero = g.products.slice(0, 4);
+      const hero = parts[0].products.slice(0, 4);
       hero.forEach((p, i) => {
         const x = 7.6 + (i % 2) * 2.75, y = 0.9 + Math.floor(i / 2) * 2.95;
         d.addShape('rect', { x, y, w: 2.6, h: 2.8, fill: { color: C.white }, line: { color: C.white } });
         pic(d, img(p.image), { x: x + 0.25, y: y + 0.25, w: 2.1, h: 2.3, sizing: { type: 'contain', w: 2.1, h: 2.3 } });
       });
       n++;
+      parts.forEach(part => {
+        if (parts.length > 1 && part.group) {
+          // group divider, e.g. "TEVEO · Accessories"
+          const gd = pptx.addSlide();
+          gd.background = { color: C.mist };
+          gd.addText(`${sel.brand} ${g.series}`.toUpperCase(), { x: 0.8, y: 2.6, w: 8, h: 0.35, fontFace: FONT, fontSize: 12, bold: true, color: C.accent, charSpacing: 3, margin: 0 });
+          gd.addText(part.group, { x: 0.8, y: 3.0, w: 11, h: 0.9, fontFace: HFONT, fontSize: 40, color: C.ink, margin: 0 });
+          gd.addText([...new Set(part.products.map(p => p.category))].join('   ·   ') + `   ·   ${part.products.length} products`, { x: 0.8, y: 3.95, w: 11.5, h: 0.5, fontFace: FONT, fontSize: 14, color: C.sub, margin: 0 });
+          n++;
+        }
       if (sel.layout === 'grid') {
-        // overview: 6 per slide, grouped by category
+        // overview: up to 6 per slide; each category starts on its own slide
         const per = 6;
-        const list = g.products;
-        for (let p = 0; p < Math.ceil(list.length / per); p++) {
+        const byCat = [];
+        part.products.forEach(p => { let e = byCat.find(x => x.cat === p.category); if (!e) byCat.push(e = { cat: p.category, list: [] }); e.list.push(p); });
+        byCat.forEach(({ cat, list }) => { for (let p = 0; p < Math.ceil(list.length / per); p++) {
           const s = pptx.addSlide();
           const chunk = list.slice(p * per, p * per + per);
-          const cats = [...new Set(chunk.map(x => x.category))];
-          header(s, `${sel.brand} ${g.series}`, cats.join(' · '));
+          header(s, `${sel.brand} ${g.series}${part.group ? '  ·  ' + part.group : ''}`, cat + (p ? ' (continued)' : ''));
           const cw = 3.98, ch = 2.62, gx = 0.18, gy = 0.2;
           chunk.forEach((pr, i) => {
             const cx = 0.5 + (i % 3) * (cw + gx), cy = 1.55 + Math.floor(i / 3) * (ch + gy);
@@ -204,13 +234,13 @@
               { text: pr.keySpecs.slice(0, 3).join('\n'), options: { fontSize: 9, color: C.sub, breakLine: true } },
               { text: 'Art. ' + base.art + (pr.variants.length > 1 ? `  +${pr.variants.length - 1} finishes` : ''), options: { fontSize: 9, color: C.sub } }
             ], { x: cx + 1.82, y: cy + 0.15, w: cw - 1.95, h: ch - 0.75, fontFace: FONT, valign: 'top', margin: 0, paraSpaceAfter: 3 });
-            pr.variants.forEach((v, k) => swatch(s, v.finish_key, cx + 1.82 + k * 0.27, cy + ch - 0.5, 0.2));
+            [...new Set(pr.variants.map(v => v.finish_key))].forEach((k2, k) => swatch(s, k2, cx + 1.82 + k * 0.27, cy + ch - 0.5, 0.2));
             if (sel.showPrices) s.addText('from ' + money(minP), { x: cx + 1.82, y: cy + ch - 0.32, w: cw - 1.95, h: 0.24, fontFace: FONT, fontSize: 10, bold: true, color: C.ink, align: 'right', margin: 0 });
           });
           footer(s, foot, n++);
-        }
+        } });
       } else {
-        g.products.forEach(pr => {
+        part.products.forEach(pr => {
           const s = pptx.addSlide();
           s.addShape('rect', { x: 0, y: 0, w: 5.2, h: 7.0, fill: { color: C.mist }, line: { color: C.mist } });
           pic(s, img(pr.image), { x: 0.6, y: 0.8, w: 4.0, h: 5.4, sizing: { type: 'contain', w: 4.0, h: 5.4 } });
@@ -235,6 +265,7 @@
           footer(s, foot, n++);
         });
       }
+      });
     });
     // closing
     const s = pptx.addSlide();

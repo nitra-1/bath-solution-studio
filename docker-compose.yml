@@ -3,7 +3,7 @@ services:
     build: .
     container_name: bath-solution-studio
     ports:
-      - "8000:8000"
+      - "8010:8000"   # open http://localhost:8010
     volumes:
       - ./data:/app/data   # database, product photos and uploaded price lists live here
     restart: unless-stopped

@@ -36,7 +36,7 @@ Pick **one** of the two ways. The computer must stay on while the team uses the 
    - **Mac / Linux:** open Terminal in the folder and run `./start.sh`
 
    The first start installs what it needs (a minute or two). Later starts are instant. Keep the window open.
-4. Open http://localhost:8000 on that computer and **create the admin account**.
+4. Open http://localhost:8010 on that computer and **create the admin account**.
 
 ### Option B: Docker
 
@@ -46,7 +46,7 @@ Install Docker Desktop, then in the project folder run:
 docker compose up -d --build
 ```
 
-It restarts automatically with the computer. Open http://localhost:8000 and create the admin account.
+It restarts automatically with the computer. Open http://localhost:8010 and create the admin account.
 
 ---
 
@@ -55,7 +55,7 @@ It restarts automatically with the computer. Open http://localhost:8000 and crea
 1. Find the office computer's address:
    - **Windows:** open Command Prompt, run `ipconfig`, note the **IPv4 Address** (for example `192.168.1.25`).
    - **Mac:** System Settings → Wi-Fi → Details → IP address.
-2. Salespeople open `http://192.168.1.25:8000` (your address) on any phone, tablet or laptop on the **same office network**.
+2. Salespeople open `http://192.168.1.25:8010` (your address) on any phone, tablet or laptop on the **same office network**.
 3. If it doesn't open from other devices on Windows, allow it through the firewall: when Windows asks on first start, choose **Allow access** for private networks (or Windows Security → Firewall → Allow an app → Python).
 4. Ask your router admin to give the office computer a **fixed IP address** so the link doesn't change.
 5. In the app, go to **Users** and add each salesperson with an email and starting password. They can change it under their name (top right).

@@ -14,12 +14,12 @@ from openpyxl.styles import Font, PatternFill
 from openpyxl.worksheet.datavalidation import DataValidation
 
 from .. import db
-from ..taxonomy import CATEGORIES, TYPE_CAT, TYPES, classify, finish_key
+from ..taxonomy import CATEGORY_GROUP, TYPE_CAT, TYPES, classify, finish_key
 from . import pdf_parser
 from .validate import validate
 
 KNOWN_STYLES = {"TEVEO": "Round, soft forms", "TOPIA": "Square, geometric forms"}
-TEMPLATE_COLS = ["Series", "Category", "Type", "Product name", "Specs (one per line)", "Article no.", "Finish", "Width mm", "Price", "Photo file name"]
+TEMPLATE_COLS = ["Series", "Type", "Product name", "Specs (one per line)", "Article no.", "Finish", "Width mm", "Price", "Photo file name"]
 
 
 def _log(cat_id, msg):
@@ -53,7 +53,7 @@ def store_products(con, cat_id, bid, products, profile=None):
         p["specs"] = [{"group": g["group"], "items": [_clean(i) for i in g["items"]]} for g in p["specs"]]
         if not p.get("type"):
             p["type"], p["name"] = classify(p["title"], p["specs"], p.get("series", ""))
-        p["category"] = p.get("category") or TYPE_CAT.get(p["type"], "Other")
+        p["category"] = TYPE_CAT.get(p["type"], "Other")
         for v in p["variants"]:
             v["finish_key"] = v.get("finish_key") or finish_key(v["finish"])
         p["attributes"] = {**_attributes(p["specs"]), **p.get("attributes", {})}
@@ -163,29 +163,26 @@ def write_template(path):
     for c in ws[1]:
         c.font = Font(bold=True, color="FFFFFF")
         c.fill = PatternFill("solid", fgColor="2F6E72")
-    ws.append(["TEVEO", "Washbasin", "basin_std", "Single lever basin mixer 110", "Outlet height: 104 mm\nProjection: 113 mm\nFlow rate: limited to 6 l/min", "582 04 01 01 00", "chrome-plated", "", 157.50, ""])
-    ws.append(["TEVEO", "Washbasin", "basin_std", "Single lever basin mixer 110", "", "582 04 37 01 00", "matt black", "", 186.70, ""])
-    widths = [14, 18, 20, 36, 44, 20, 26, 10, 10, 22]
+    ws.append(["TEVEO", "basin_std", "Single lever basin mixer 110", "Outlet height: 104 mm\nProjection: 113 mm\nFlow rate: limited to 6 l/min", "582 04 01 01 00", "chrome-plated", "", 157.50, ""])
+    ws.append(["TEVEO", "basin_std", "Single lever basin mixer 110", "", "582 04 37 01 00", "matt black", "", 186.70, ""])
+    widths = [14, 20, 36, 44, 20, 26, 10, 10, 22]
     for i, w in enumerate(widths):
         ws.column_dimensions[chr(65 + i)].width = w
-    dv1 = DataValidation(type="list", formula1='"' + ",".join(CATEGORIES) + '"', allow_blank=True)
-    dv2 = DataValidation(type="list", formula1="=Types!$A$2:$A$" + str(len(TYPES) + 1), allow_blank=True)
-    ws.add_data_validation(dv1)
-    ws.add_data_validation(dv2)
-    dv1.add("B2:B5000")
-    dv2.add("C2:C5000")
+    dv = DataValidation(type="list", formula1="=Types!$A$2:$A$" + str(len(TYPES) + 1), allow_blank=True)
+    ws.add_data_validation(dv)
+    dv.add("B2:B5000")
     t = wb.create_sheet("Types")
-    t.append(["Type key", "Meaning", "Category"])
+    t.append(["Type key", "Meaning", "Category", "Group"])
     for k, l, c in TYPES:
-        t.append([k, l, c])
+        t.append([k, l, c, CATEGORY_GROUP[c]])
     t.column_dimensions["A"].width = 22
     t.column_dimensions["B"].width = 50
     h = wb.create_sheet("How to fill")
     for line in [
         "One row per article number (one finish or size of a product).",
         "Rows with the same Series + Product name become one product with several finishes.",
-        "Specs, Category and Type only need to be on the first row of each product.",
-        "Type decides how the solution builder uses the product. See the Types sheet; leave blank to let the system guess.",
+        "Specs and Type only need to be on the first row of each product.",
+        "Type decides the product's category and how the solution builder uses it. See the Types sheet; leave blank to let the system guess from the name.",
         "Photos: after upload, add a photo to each product on the review screen.",
         "Prices: numbers only, in the brand's currency (set when uploading).",
     ]:
@@ -223,7 +220,6 @@ def read_template(path, default_series=""):
                  "variants": [], "image": None}
             if typ in TYPE_CAT:
                 p["type"] = typ
-                p["category"] = str(g("category") or "").strip() if str(g("category") or "").strip() in CATEGORIES else TYPE_CAT[typ]
             by_key[key] = p
             products.append(p)
         p = by_key[key]

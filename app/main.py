@@ -15,7 +15,7 @@ from pydantic import BaseModel, Field
 
 from . import auth, db
 from .extract import ingest, profiles
-from .taxonomy import CATEGORIES, FINISHES, TYPE_CAT, TYPES, finish_key
+from .taxonomy import CATEGORIES, FINISHES, GROUPS, TYPE_CAT, TYPES, finish_key, sync_categories
 
 ROOT = Path(__file__).resolve().parent.parent
 STATIC = ROOT / "static"
@@ -24,6 +24,8 @@ VERSION = "1.0.0"
 @asynccontextmanager
 async def lifespan(_app):
     db.init()
+    with db.connect() as c:
+        sync_categories(c)
     with db.connect() as c:  # catalogs interrupted by a restart
         c.execute("UPDATE catalogs SET status='failed', log=coalesce(log,'')||'Stopped: the server restarted during processing. Upload again.\n' WHERE status='processing'")
     yield
@@ -198,7 +200,7 @@ def put_settings(body: SettingsIn, _=Depends(auth.require_admin)):
 # ---------- reference data ----------
 @app.get("/api/meta")
 def meta(_=Depends(auth.current_user)):
-    return {"categories": CATEGORIES, "types": [{"key": k, "label": l, "category": c} for k, l, c in TYPES],
+    return {"categories": CATEGORIES, "groups": [{"name": g, "categories": cats} for g, cats in GROUPS], "types": [{"key": k, "label": l, "category": c} for k, l, c in TYPES],
             "finishes": [{"key": k, "label": l, "color": col} for k, l, col in FINISHES],
             "readers": profiles.all_readers()}
 
@@ -416,7 +418,7 @@ class ProductIn(BaseModel):
 def _save_product(c, pid, body: ProductIn):
     if body.type not in TYPE_CAT:
         raise HTTPException(400, "Unknown product type.")
-    cat = body.category if body.category in CATEGORIES else TYPE_CAT[body.type]
+    cat = TYPE_CAT[body.type]  # category always follows the type
     c.execute("UPDATE products SET series=?,category=?,type=?,name=?,specs=?,note=? WHERE id=?",
               (body.series.strip(), cat, body.type, body.name.strip(), json.dumps(body.specs), body.note, pid))
     keep = []

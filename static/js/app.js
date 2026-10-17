@@ -72,6 +72,10 @@ async function loadCatalog() {
   S.catalog = await api('GET', '/api/catalog');
   S.E = Engine.make(S.catalog, S.meta);
   const b = S.catalog.brands[0];
+  if (S.range) {  // saved choices from an earlier version may use old category names
+    S.range.categories = (S.range.categories || []).filter(c => S.meta.categories.includes(c));
+    if (!S.range.categories.length) S.range.categories = S.meta.categories.slice();
+  }
   if (!S.range || !S.catalog.brands.find(x => x.name === S.range.brand)) {
     S.range = b ? { brand: b.name, series: b.series.map(s => s.name), categories: S.meta.categories.slice(), finishes: S.meta.finishes.map(f => f.key), exclude: [], layout: 'detail', showPrices: false, title: `${b.name} collections`, recipient: '' } : null;
   }
@@ -157,7 +161,11 @@ async function openProject(id) {
   S.project.rooms.forEach(r => {
     if (!S.E.brandOf(r.brand)) Object.assign(r, defaultsFor());
     if (!r.edited) rebuild(r);
-    else r.items = r.items.filter(i => S.E.byId[i.pid] || (r.warnings = [...(r.warnings || []), `${i.name} (${i.art}) is no longer in the catalog and was removed.`], false));
+    else {
+      r.items = r.items.filter(i => S.E.byId[i.pid] || (r.warnings = [...(r.warnings || []), `${i.name} (${i.art}) is no longer in the catalog and was removed.`], false));
+      r.items.forEach(i => { i.category = S.E.byId[i.pid].category; });
+      r.items = S.E.sortItems(r.items);
+    }
   });
   renderProject();
 }
@@ -230,7 +238,7 @@ function itemRow(r, it) {
 }
 function addSelect(r) {
   const groups = S.meta.categories.map(c => [c, S.catalog.products.filter(p => p.brand === r.brand && p.category === c).sort((a, b) => (a.series === r.series ? -1 : 1) - (b.series === r.series ? -1 : 1))]).filter(g => g[1].length);
-  return `<select class="add" aria-label="Add a product" id="add-${r.id}" data-act="add" data-room="${r.id}"><option value="">+ Add a product…</option>${groups.map(([c, ps]) => `<optgroup label="${esc(c)}">${ps.map(p => `<option value="${p.id}">${esc(p.series + ' · ' + p.name)}</option>`).join('')}</optgroup>`).join('')}</select>`;
+  return `<select class="add" aria-label="Add a product" id="add-${r.id}" data-act="add" data-room="${r.id}"><option value="">+ Add a product…</option>${groups.map(([c, ps]) => `<optgroup label="${esc(S.E.groupOf(c) + ' · ' + c)}">${ps.map(p => `<option value="${p.id}">${esc(p.series + ' · ' + p.name)}</option>`).join('')}</optgroup>`).join('')}</select>`;
 }
 function roomCard(r) {
   const b = S.E.brandOf(r.brand) || {};
@@ -246,7 +254,10 @@ function roomCard(r) {
       <div class="items">
         ${r.edited ? `<div class="warns" style="background:var(--accent-soft);color:var(--ink);display:flex;gap:10px;align-items:center;justify-content:space-between;flex-wrap:wrap"><p>You edited this list by hand. Changes to the form on the left won't apply until you rebuild.</p><button class="btn" type="button" data-act="rebuild" data-room="${r.id}">Rebuild from form</button></div>` : ''}
         ${(r.warnings || []).length ? `<div class="warns">${r.warnings.map(w => `<p>${esc(w)}</p>`).join('')}</div>` : ''}
-        ${r.items.length ? r.items.map(it => itemRow(r, it)).join('') : '<div class="empty">No products yet. Choose fixtures on the left or add a product.</div>'}
+        ${r.items.length ? r.items.map((it, i) => {
+          const g = S.E.groupOf(it.category), prev = i ? S.E.groupOf(r.items[i - 1].category) : null;
+          return (g && g !== prev ? `<div class="grouphead">${esc(g)}</div>` : '') + itemRow(r, it);
+        }).join('') : '<div class="empty">No products yet. Choose fixtures on the left or add a product.</div>'}
         <div class="room-foot">${addSelect(r)}<span class="muted small">${esc(b.price_basis || '')} · ${esc(b.currency || '')}</span></div>
       </div>
     </div></section>`;
@@ -291,7 +302,7 @@ async function pptSolution(btn) {
     const brands = [...new Set(P.rooms.map(r => r.brand))].map(n => S.E.brandOf(n)).filter(Boolean);
     const rooms = P.rooms.map(r => ({ ...r, style: ((S.E.brandOf(r.brand) || { series: [] }).series.find(s => s.name === r.series) || {}).style || '', finishLabel: S.E.finishLabel(r.finish), brief: briefOf(r) }));
     const pptx = new PptxGenJS();
-    DeckBuilder.buildSolution(pptx, { title: P.title, customer: P.customer, site: P.site, salesperson: S.me.name, dealer: st.dealer, notes: P.notes, date: today(), rooms,
+    DeckBuilder.buildSolution(pptx, { groupOf: S.E.groupOf, title: P.title, customer: P.customer, site: P.site, salesperson: S.me.name, dealer: st.dealer, notes: P.notes, date: today(), rooms,
       currency: brands[0] ? brands[0].currency : 'EUR', priceNote: brands.map(b => `${b.name}: ${b.price_basis}, ${b.currency}`).join('; '), sources: brands.map(b => `${b.name} ${b.catalog}`).join(', ') }, img);
     download(slug(P.title) + '-proposal.pptx', await pptx.write({ outputType: 'blob' }));
   } catch (e) { toast('Could not build the deck: ' + e.message); }
@@ -304,13 +315,17 @@ function viewRange() {
   const R = S.range, E = S.E, b = E.brandOf(R.brand);
   const all = E.rangeGroups({ ...R, exclude: [] }), groups = E.rangeGroups(R);
   const count = groups.reduce((a, g) => a + g.products.length, 0);
-  const slides = 2 + groups.length + (R.layout === 'grid' ? groups.reduce((a, g) => a + Math.ceil(g.products.length / 6), 0) : count);
+  const slides = 2 + groups.reduce((a, g) => {
+    const grps = new Set(g.products.map(p => E.groupOf(p.category)));
+    const perCat = Object.values(g.products.reduce((m, p) => (m[p.category] = (m[p.category] || 0) + 1, m), {}));
+    return a + 1 + (grps.size > 1 ? grps.size : 0) + (R.layout === 'grid' ? perCat.reduce((x, n) => x + Math.ceil(n / 6), 0) : g.products.length);
+  }, 0);
   $('#main').innerHTML = `<h1>Brand range deck</h1><p class="lede">Send an architect or designer a brand's range, or keep a brand-wise reference for the sales team. Every product gets its finishes and article numbers.</p>
   <div class="range">
     <section class="card panel">
       <label class="field"><span>Brand</span><select id="r-brand" data-r="brand">${opts(S.catalog.brands.map(x => [x.name, x.name]), R.brand)}</select><span class="muted small" style="text-transform:none;letter-spacing:0;font-weight:400">${esc(b.catalog)} · ${esc(b.price_basis)} · ${esc(b.currency)}</span></label>
       <div class="field"><span>Collections</span><div class="checks">${b.series.map(s => `<label><input type="checkbox" id="rs-${esc(s.name)}" data-rlist="series" value="${esc(s.name)}" ${R.series.includes(s.name) ? 'checked' : ''}> ${esc(s.name)} <span class="muted small">${esc(s.style)}</span></label>`).join('')}</div></div>
-      <div class="field"><span>Categories</span><div class="checks">${S.meta.categories.map(c => `<label><input type="checkbox" data-rlist="categories" value="${esc(c)}" ${R.categories.includes(c) ? 'checked' : ''}> ${esc(c)}</label>`).join('')}</div></div>
+      ${S.meta.groups.filter(g => g.name !== 'Other').map(g => `<div class="field"><span>${esc(g.name)}</span><div class="checks">${g.categories.map(c => `<label><input type="checkbox" data-rlist="categories" value="${esc(c)}" ${R.categories.includes(c) ? 'checked' : ''}> ${esc(c)}</label>`).join('')}</div></div>`).join('')}
       <div class="field"><span>Finishes to list</span><div class="checks">${S.meta.finishes.map(f => `<label><input type="checkbox" data-rlist="finishes" value="${f.key}" ${R.finishes.includes(f.key) ? 'checked' : ''}> <span class="dot" style="background:#${f.color}"></span> ${esc(f.label)}</label>`).join('')}</div></div>
       <div class="field"><span>Layout</span>${seg('rlayout', [['detail', 'One product per slide'], ['grid', 'Overview, 6 per slide']], R.layout)}</div>
       <label><input type="checkbox" id="r-prices" data-rbool="showPrices" ${R.showPrices ? 'checked' : ''}> Show prices (internal use)</label>
@@ -320,9 +335,10 @@ function viewRange() {
     <section class="card">
       <div class="room-head"><b>${count} products</b><span class="muted small">about ${slides} slides · ${R.showPrices ? 'with prices' : 'no prices'}</span>
         <div class="sub"><button class="btn ghost" type="button" data-act="rall">Include all</button></div></div>
-      ${all.length ? all.map(g => `<div class="grid"><div class="cathead"><h2>${esc(g.series)}</h2><span class="muted small">${esc(g.style)}</span></div>${g.products.map(p => {
+      ${all.length ? all.map(g => `<div class="grid"><div class="cathead"><h2>${esc(g.series)}</h2><span class="muted small">${esc(g.style)}</span></div>${g.products.map((p, i) => {
         const on = !R.exclude.includes(p.id);
-        return `<label class="tile ${on ? '' : 'off'}"><input type="checkbox" data-rx="${p.id}" ${on ? 'checked' : ''}><div class="im">${p.image ? `<img alt="" loading="lazy" src="${esc(p.image)}">` : ''}</div><div class="tx"><span class="c">${esc(p.category)}</span><span class="n">${esc(p.name)}</span><span>${p.variants.map(v => `<span class="dot" style="background:${swc(v.finish_key)}"></span>`).join(' ')}</span></div></label>`;
+        const head = !i || g.products[i - 1].category !== p.category ? `<div class="cathead small"><b>${esc(p.category)}</b><span class="muted">${esc(E.groupOf(p.category))}</span></div>` : '';
+        return head + `<label class="tile ${on ? '' : 'off'}"><input type="checkbox" data-rx="${p.id}" ${on ? 'checked' : ''}><div class="im">${p.image ? `<img alt="" loading="lazy" src="${esc(p.image)}">` : ''}</div><div class="tx"><span class="c">${esc(p.category)}</span><span class="n">${esc(p.name)}</span><span>${p.variants.map(v => `<span class="dot" style="background:${swc(v.finish_key)}"></span>`).join(' ')}</span></div></label>`;
       }).join('')}</div>`).join('') : '<div class="empty">Pick at least one collection and category.</div>'}
     </section>
   </div>`;
@@ -337,7 +353,7 @@ async function pptRange(btn) {
     const groups = S.E.rangeGroups(R);
     const img = await dataUrls(groups.flatMap(g => g.products.map(p => p.image)));
     const pptx = new PptxGenJS();
-    DeckBuilder.buildRange(pptx, { brand: R.brand, catalog: b.catalog, currency: b.currency, priceNote: `${b.price_basis}, ${b.currency}`, title: R.title || `${R.brand} collections`, recipient: R.recipient,
+    DeckBuilder.buildRange(pptx, { groupOf: S.E.groupOf, brand: R.brand, catalog: b.catalog, currency: b.currency, priceNote: `${b.price_basis}, ${b.currency}`, title: R.title || `${R.brand} collections`, recipient: R.recipient,
       salesperson: S.me.name, dealer: st.dealer, contact: st.contact, date: today(), showPrices: R.showPrices, layout: R.layout, groups }, img);
     download(slug(R.title || R.brand) + '-range.pptx', await pptx.write({ outputType: 'blob' }));
   } catch (e) { toast('Could not build the deck: ' + e.message); }
@@ -367,7 +383,7 @@ function viewCatalog() {
       <input type="text" id="c-q" data-c="q" value="${esc(C.q)}" placeholder="Search name, spec or article no." style="max-width:300px">
       <select id="c-b" data-c="brand" style="width:auto"><option value="">All brands</option>${opts(S.catalog.brands.map(b => [b.name, b.name]), C.brand)}</select>
       ${brand ? `<select id="c-s" data-c="series" style="width:auto"><option value="">All collections</option>${opts(brand.series.map(s => [s.name, s.name]), C.series)}</select>` : ''}
-      <select id="c-c" data-c="category" style="width:auto"><option value="">All categories</option>${opts(S.meta.categories.map(c => [c, c]), C.category)}</select>
+      <select id="c-c" data-c="category" style="width:auto"><option value="">All categories</option>${S.meta.groups.map(g => `<optgroup label="${esc(g.name)}">${opts(g.categories.map(c => [c, c]), C.category)}</optgroup>`).join('')}</select>
       <div class="sub muted small" id="c-count">${rows.length} products</div>
     </div>
     <div class="tbl" id="c-tbl">${catTable(rows)}</div>
@@ -448,7 +464,7 @@ function renderReview() {
   const R = S.review, c = R.catalog, only = R.only, q = (R.q || '').toLowerCase();
   const list = R.products.filter(p => (!only || needsWork(p)) && (!q || (p.name + ' ' + p.series + ' ' + p.variants.map(v => v.art).join(' ')).toLowerCase().includes(q)));
   const nWork = R.products.filter(needsWork).length;
-  const typeOpts = S.meta.categories.map(cat => `<optgroup label="${esc(cat)}">${S.meta.types.filter(t => t.category === cat).map(t => `<option value="${t.key}">${esc(t.label)}</option>`).join('')}</optgroup>`).join('');
+  const typeOpts = S.meta.categories.map(cat => `<optgroup label="${esc(S.E.groupOf(cat) + ' · ' + cat)}">${S.meta.types.filter(t => t.category === cat).map(t => `<option value="${t.key}">${esc(t.label)}</option>`).join('')}</optgroup>`).join('');
   $('#main').innerHTML = `<a href="#/admin/catalogs" class="small">← All catalogs</a>
   <div class="row" style="justify-content:space-between;margin-top:4px"><div><h1>${esc(c.brand)} · ${esc(c.name)} <span class="status ${c.status}">${c.status}</span></h1>
     <p class="lede">${R.products.length} products from ${esc(c.filename || '')}. ${nWork ? `${nWork} need attention.` : 'Nothing flagged.'} Sales see this catalog only after you publish it.</p></div></div>
@@ -572,7 +588,7 @@ function viewSettings() {
 /* ---------- events ---------- */
 const roomOf = el => S.project.rooms.find(r => r.id === el.dataset.room);
 const setPath = (o, path, v) => { const k = path.split('.'); let t = o; k.slice(0, -1).forEach(x => t = t[x]); t[k[k.length - 1]] = v; };
-function changed(r) { if (r && !r.edited) rebuild(r); saveSoon(); renderProject(); }
+function changed(r) { if (r && !r.edited) rebuild(r); else if (r) r.items = S.E.sortItems(r.items); saveSoon(); renderProject(); }
 function saveRange() { store.set('bss.range', S.range); viewRange(); }
 
 document.addEventListener('click', async e => {

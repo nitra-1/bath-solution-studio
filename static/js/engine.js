@@ -14,6 +14,10 @@
     const FIN = meta.finishes;
     const TYPE_LABEL = Object.fromEntries(meta.types.map(t => [t.key, t.label]));
     const CAT_ORDER = meta.categories;
+    const GROUP_OF = Object.fromEntries((meta.groups || []).flatMap(g => g.categories.map(c => [c, g.name])));
+    const groupOf = c => GROUP_OF[c] || '';
+    const catRank = c => { const i = CAT_ORDER.indexOf(c); return i < 0 ? 999 : i; };
+    const sortItems = items => items.map((it, i) => [it, i]).sort((a, b) => catRank(a[0].category) - catRank(b[0].category) || a[1] - b[1]).map(x => x[0]);
     const byId = Object.fromEntries(P.map(p => [p.id, p]));
     const find = (brand, series, type) => P.find(p => p.brand === brand && p.series === series && p.type === type);
     const finishLabel = k => (FIN.find(f => f.key === k) || {}).label || k;
@@ -113,7 +117,7 @@
         if (m) { m.qty += it.qty; if (it.why && !m.why.includes(it.why)) m.why = m.why ? m.why + '; ' + it.why : it.why; }
         else merged.push(it);
       });
-      return { items: merged, warnings: [...new Set(warn)] };
+      return { items: sortItems(merged), warnings: [...new Set(warn)] };
     }
     function alternatives(it) {
       const cur = byId[it.pid];
@@ -128,7 +132,7 @@
       if (!brand) return [];
       return o.series.map(s => {
         const prods = P.filter(p => p.brand === o.brand && p.series === s && o.categories.includes(p.category) && !(o.exclude || []).includes(p.id))
-          .sort((a, b) => CAT_ORDER.indexOf(a.category) - CAT_ORDER.indexOf(b.category))
+          .map((p, i) => [p, i]).sort((a, b) => catRank(a[0].category) - catRank(b[0].category) || a[1] - b[1]).map(x => x[0])
           .map(p => {
             const vs = p.variants.filter(v => o.finishes.includes(v.finish_key));
             return {
@@ -143,7 +147,7 @@
         return { series: s, style: meta2 ? meta2.style : '', products: prods, finishes: order.map(k => ({ key: k, short: finishLabel(k) })) };
       }).filter(g => g.products.length);
     }
-    return { buildRoom, alternatives, swap, refinish, item, byId, find, finishLabel, rangeGroups, brandOf, CAT_ORDER, FIN };
+    return { buildRoom, alternatives, swap, refinish, item, byId, find, finishLabel, rangeGroups, brandOf, groupOf, sortItems, CAT_ORDER, FIN };
   }
   const api = { make, ROOM_PRESETS };
   if (typeof module !== 'undefined' && module.exports) module.exports = api; else root.Engine = api;

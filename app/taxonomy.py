@@ -5,63 +5,80 @@ brand can be used once its type is set (by the parser or by the admin).
 """
 import re
 
-CATEGORIES = ["Washbasin", "Bidet", "Shower", "Bath tub", "Hand & head showers", "Accessories", "Other"]
+# Two groups: the main products a customer chooses, and the accessories that go with
+# them. Each category belongs to one group; each type belongs to one category.
+GROUPS = [
+    ("Main products", ["Basin mixers", "Bidet & health faucets", "Shower mixers", "Bath mixers & spouts", "Shower heads", "Hand showers"]),
+    ("Accessories", ["Shower arms", "Hoses, outlets & holders", "Waste, traps & valves", "Towel holders", "Toilet paper holders", "Shelves & mirrors"]),
+    ("Other", ["Other"]),
+]
+CATEGORIES = [c for _, cats in GROUPS for c in cats]
+CATEGORY_GROUP = {c: g for g, cats in GROUPS for c in cats}
 
 # key, label, category
 TYPES = [
-    ("basin_std", "Basin mixer, standard height", "Washbasin"),
-    ("basin_mid", "Basin mixer, raised", "Washbasin"),
-    ("basin_tall", "Basin mixer, tall (vessel basin)", "Washbasin"),
-    ("basin_wall", "Basin mixer, wall-mounted concealed", "Washbasin"),
-    ("basin_3hole", "Basin mixer, three-hole", "Washbasin"),
-    ("waste", "Basin waste plug", "Washbasin"),
-    ("trap", "Bottle trap", "Washbasin"),
-    ("angle_valve", "Angle valve", "Washbasin"),
-    ("bidet_spray", "Bidet spray set / health faucet", "Bidet"),
-    ("bidet_concealed", "Bidet mixer, concealed", "Bidet"),
-    ("shower_exposed", "Shower mixer, exposed", "Shower"),
-    ("shower_exposed_bar", "Shower mixer, exposed (bar design)", "Shower"),
-    ("shower_thermo_exposed", "Thermostatic shower mixer, exposed", "Shower"),
-    ("conc_1f", "Concealed mixer, 1 function", "Shower"),
-    ("conc_2f_push", "Concealed mixer, 2 functions, push diverter", "Shower"),
-    ("conc_2f_rot", "Concealed mixer, 2 functions, rotating diverter", "Shower"),
-    ("thermo_2f", "Thermostatic concealed, 2 functions", "Shower"),
-    ("thermo_3f", "Thermostatic concealed, 3 functions", "Shower"),
-    ("bath_exposed", "Bath mixer, exposed", "Bath tub"),
-    ("bath_exposed_bar", "Bath mixer, exposed (bar design)", "Bath tub"),
-    ("bath_exposed_set", "Bath mixer set with hand shower, exposed", "Bath tub"),
-    ("bath_thermo_exposed", "Thermostatic bath mixer, exposed", "Bath tub"),
-    ("bath_floor", "Bath mixer, floor-standing", "Bath tub"),
-    ("bath_4hole", "Bath mixer, four-hole bath rim", "Bath tub"),
-    ("bath_filler", "Bath filler / spout", "Bath tub"),
-    ("bath_filler_div", "Bath filler with diverter", "Bath tub"),
-    ("hand_shower", "Hand shower", "Hand & head showers"),
-    ("shower_hose", "Shower hose", "Hand & head showers"),
-    ("head_250", "Overhead shower, about 250 mm", "Hand & head showers"),
-    ("head_300", "Overhead shower, about 300 mm", "Hand & head showers"),
-    ("arm_wall", "Shower arm, wall-mounted", "Hand & head showers"),
-    ("arm_ceiling", "Shower arm, ceiling-mounted", "Hand & head showers"),
-    ("hose_union", "Hose union / wall outlet", "Hand & head showers"),
-    ("hose_union_bracket", "Hose union with bracket", "Hand & head showers"),
-    ("hose_union_set", "Hose union set with hand shower", "Hand & head showers"),
-    ("hand_bracket", "Hand shower bracket", "Hand & head showers"),
-    ("rail", "Hand shower sliding rail", "Hand & head showers"),
-    ("rail_set", "Sliding rail set with hand shower", "Hand & head showers"),
-    ("hook", "Towel hook", "Accessories"),
-    ("hook_double", "Towel hook, double", "Accessories"),
-    ("towel_ring", "Towel ring", "Accessories"),
-    ("towel_rail", "Towel rail", "Accessories"),
-    ("towel_rack", "Towel rack", "Accessories"),
-    ("tp_rigid", "Toilet paper holder", "Accessories"),
-    ("tp_swivel", "Toilet paper holder, swivelling", "Accessories"),
-    ("tp_shelf", "Toilet paper holder with shelf", "Accessories"),
-    ("tp_double_shelf", "Toilet paper holder, double, with shelf", "Accessories"),
-    ("shower_shelf", "Shower shelf / basket", "Accessories"),
-    ("mirror", "Cosmetic mirror", "Accessories"),
+    ("basin_std", "Basin mixer, standard height", "Basin mixers"),
+    ("basin_mid", "Basin mixer, raised", "Basin mixers"),
+    ("basin_tall", "Basin mixer, tall (vessel basin)", "Basin mixers"),
+    ("basin_wall", "Basin mixer, wall-mounted concealed", "Basin mixers"),
+    ("basin_3hole", "Basin mixer, three-hole", "Basin mixers"),
+    ("bidet_spray", "Bidet spray set / health faucet", "Bidet & health faucets"),
+    ("bidet_concealed", "Bidet mixer, concealed", "Bidet & health faucets"),
+    ("shower_exposed", "Shower mixer, exposed", "Shower mixers"),
+    ("shower_exposed_bar", "Shower mixer, exposed (bar design)", "Shower mixers"),
+    ("shower_thermo_exposed", "Thermostatic shower mixer, exposed", "Shower mixers"),
+    ("conc_1f", "Concealed mixer, 1 function", "Shower mixers"),
+    ("conc_2f_push", "Concealed mixer, 2 functions, push diverter", "Shower mixers"),
+    ("conc_2f_rot", "Concealed mixer, 2 functions, rotating diverter", "Shower mixers"),
+    ("thermo_2f", "Thermostatic concealed, 2 functions", "Shower mixers"),
+    ("thermo_3f", "Thermostatic concealed, 3 functions", "Shower mixers"),
+    ("bath_exposed", "Bath mixer, exposed", "Bath mixers & spouts"),
+    ("bath_exposed_bar", "Bath mixer, exposed (bar design)", "Bath mixers & spouts"),
+    ("bath_exposed_set", "Bath mixer set with hand shower, exposed", "Bath mixers & spouts"),
+    ("bath_thermo_exposed", "Thermostatic bath mixer, exposed", "Bath mixers & spouts"),
+    ("bath_floor", "Bath mixer, floor-standing", "Bath mixers & spouts"),
+    ("bath_4hole", "Bath mixer, four-hole bath rim", "Bath mixers & spouts"),
+    ("bath_filler", "Bath filler / spout", "Bath mixers & spouts"),
+    ("bath_filler_div", "Bath filler with diverter", "Bath mixers & spouts"),
+    ("head_250", "Overhead shower, about 250 mm", "Shower heads"),
+    ("head_300", "Overhead shower, about 300 mm", "Shower heads"),
+    ("hand_shower", "Hand shower", "Hand showers"),
+    ("rail_set", "Sliding rail set with hand shower", "Hand showers"),
+    ("hose_union_set", "Hose union set with hand shower", "Hand showers"),
+    ("arm_wall", "Shower arm, wall-mounted", "Shower arms"),
+    ("arm_ceiling", "Shower arm, ceiling-mounted", "Shower arms"),
+    ("shower_hose", "Shower hose", "Hoses, outlets & holders"),
+    ("hose_union", "Hose union / wall outlet", "Hoses, outlets & holders"),
+    ("hose_union_bracket", "Hose union with bracket", "Hoses, outlets & holders"),
+    ("hand_bracket", "Hand shower bracket", "Hoses, outlets & holders"),
+    ("rail", "Hand shower sliding rail", "Hoses, outlets & holders"),
+    ("waste", "Basin waste plug", "Waste, traps & valves"),
+    ("trap", "Bottle trap", "Waste, traps & valves"),
+    ("angle_valve", "Angle valve", "Waste, traps & valves"),
+    ("hook", "Towel hook", "Towel holders"),
+    ("hook_double", "Towel hook, double", "Towel holders"),
+    ("towel_ring", "Towel ring", "Towel holders"),
+    ("towel_rail", "Towel rail", "Towel holders"),
+    ("towel_rack", "Towel rack", "Towel holders"),
+    ("tp_rigid", "Toilet paper holder", "Toilet paper holders"),
+    ("tp_swivel", "Toilet paper holder, swivelling", "Toilet paper holders"),
+    ("tp_shelf", "Toilet paper holder with shelf", "Toilet paper holders"),
+    ("tp_double_shelf", "Toilet paper holder, double, with shelf", "Toilet paper holders"),
+    ("shower_shelf", "Shower shelf / basket", "Shelves & mirrors"),
+    ("mirror", "Cosmetic mirror", "Shelves & mirrors"),
     ("other", "Other (not used by the solution builder)", "Other"),
 ]
 TYPE_CAT = {k: c for k, _, c in TYPES}
 TYPE_LABEL = {k: l for k, l, _ in TYPES}
+assert all(c in CATEGORY_GROUP for c in TYPE_CAT.values())
+
+
+def sync_categories(con):
+    """Category always follows the product's type. Re-applied at start-up so databases
+    created with older category names pick up the current ones."""
+    for k, c in TYPE_CAT.items():
+        con.execute("UPDATE products SET category=? WHERE type=? AND category!=?", (c, k, c))
+    con.execute("UPDATE products SET type='other', category='Other' WHERE type NOT IN (%s)" % ",".join("?" * len(TYPE_CAT)), tuple(TYPE_CAT))
 
 FINISHES = [
     ("chrome", "Chrome", "C9CED3"), ("black", "Matt black", "232323"), ("nickel", "Brushed nickel", "A9A498"),
@@ -180,6 +197,8 @@ def classify(title: str, specs: list, series: str = ""):
     elif "shower head" in T or "overhead" in T or "rain shower" in T or "head shower" in T:
         d = _num(specs, "Diameter") or _num(specs, "Dimension") or _num(specs, "Size")
         t = "head_300" if (d or 250) >= 280 else "head_250"
+        if d and not re.search(r"\d", name):
+            name = f"{name} {int(d)} mm"
     elif "shower arm" in T and "ceiling" in T:
         t = "arm_ceiling"
     elif "shower arm" in T:

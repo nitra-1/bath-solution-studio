@@ -50,8 +50,8 @@ def test_excel_flow_and_roles(admin):
     # fill the template with two products
     wb = load_workbook(io.BytesIO(admin.get("/api/template.xlsx").content))
     ws = wb["Products"]
-    ws.append(["AURA", "Shower", "shower_exposed", "Wall shower mixer", "Flow rate: 12 l/min", "AU-100-CH", "Chrome", "", 120, ""])
-    ws.append(["AURA", "Shower", "shower_exposed", "Wall shower mixer", "", "AU-100-BK", "Matt black", "", 150, ""])
+    ws.append(["AURA", "shower_exposed", "Wall shower mixer", "Flow rate: 12 l/min", "AU-100-CH", "Chrome", "", 120, ""])
+    ws.append(["AURA", "shower_exposed", "Wall shower mixer", "", "AU-100-BK", "Matt black", "", 150, ""])
     buf = io.BytesIO()
     wb.save(buf)
     r = admin.post("/api/catalogs", data={"brand": "Aura Test", "currency": "INR"},
@@ -62,6 +62,7 @@ def test_excel_flow_and_roles(admin):
     names = {p["name"]: p for p in d["products"]}
     assert len(names["Wall shower mixer"]["variants"]) == 2
     assert names["Wall shower mixer"]["variants"][1]["finish_key"] == "black"
+    assert names["Wall shower mixer"]["category"] == "Shower mixers"
 
     # sales user can't see unpublished catalogs or admin endpoints
     assert admin.post("/api/users", json={"email": "sam@shop.in", "name": "Sam", "password": "salespass1"}).status_code == 200
@@ -102,3 +103,15 @@ def test_deactivated_user_cannot_sign_in(admin):
     admin.patch(f"/api/users/{uid}", json={"active": False})
     with TestClient(app) as c:
         assert c.post("/api/login", json={"email": "kim@shop.in", "password": "salespass2"}).status_code == 401
+
+
+def test_categories_follow_type(admin):
+    from app import db
+    from app.taxonomy import CATEGORIES, sync_categories
+    meta = admin.get("/api/meta").json()
+    assert [g["name"] for g in meta["groups"]][:2] == ["Main products", "Accessories"]
+    with db.connect() as c:  # a database from the earlier version, with the old category names
+        c.execute("UPDATE products SET category='Hand & head showers'")
+        sync_categories(c)
+        cats = {r["category"] for r in db.rows(c, "SELECT category FROM products")}
+    assert cats <= set(CATEGORIES)

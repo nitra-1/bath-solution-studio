@@ -8,10 +8,14 @@ if [ ! -d .venv ]; then
   .venv/bin/pip install --upgrade pip >/dev/null
   .venv/bin/pip install -r requirements.txt
 fi
-PORT="${PORT:-8000}"
-IP=$( (ipconfig getifaddr en0 2>/dev/null || hostname -I 2>/dev/null | awk '{print $1}') )
+PORT="${PORT:-8010}"
+while .venv/bin/python -c "import socket,sys; s=socket.socket(); sys.exit(0 if s.connect_ex(('127.0.0.1', $PORT)) == 0 else 1)"; do
+  echo "Port $PORT is already used by another program. Trying the next one…"
+  PORT=$((PORT + 1))
+done
+IP=$( (ipconfig getifaddr en0 2>/dev/null || hostname -I 2>/dev/null | awk '{print $1}') || true )
 echo ""
-echo "Bath Solution Studio is running."
+echo "Bath Solution Studio is starting."
 echo "  On this computer:        http://localhost:$PORT"
 [ -n "$IP" ] && echo "  For the sales team:      http://$IP:$PORT"
 echo "Keep this window open. Press Ctrl+C to stop."
