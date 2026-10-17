@@ -1,0 +1,9 @@
+services:
+  studio:
+    build: .
+    container_name: bath-solution-studio
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./data:/app/data   # database, product photos and uploaded price lists live here
+    restart: unless-stopped

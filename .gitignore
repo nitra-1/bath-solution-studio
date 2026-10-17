@@ -1,0 +1,10 @@
+# runtime data (database, photos, uploaded price lists) stays on the office computer
+data/*
+!data/.gitkeep
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.DS_Store
+# sample price lists are large and belong to the brands; keep them local. Commit the .expected.json files.
+tests/samples/*.pdf
