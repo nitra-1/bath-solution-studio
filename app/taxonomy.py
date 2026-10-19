@@ -133,7 +133,7 @@ def classify(title: str, specs: list, series: str = ""):
         t, name = "basin_wall", "Basin mixer, wall-mounted (concealed)"
     elif "basin" in T and ("three-hole" in T or "3-hole" in T or "3 hole" in T):
         t = "basin_3hole"
-    elif "basin" in T and ("mixer" in T or "tap" in T or "faucet" in T):
+    elif ("basin" in T or "lavatory" in T) and ("mixer" in T or "tap" in T or "faucet" in T):
         h = _num(specs, "Outlet height")
         if T.endswith(" 150") and series.upper() == "TOPIA":
             t, name = "basin_3hole", "Three-hole basin mixer 150"
@@ -184,9 +184,9 @@ def classify(title: str, specs: list, series: str = ""):
         t = "rail"
     elif "hose union set" in T or "outlet set" in T:
         t = "hose_union_set"
-    elif ("hose union" in T or "wall outlet" in T or "wall elbow" in T) and "bracket" in T:
+    elif ("hose union" in T or "wall outlet" in T or "wall elbow" in T or "supply elbow" in T) and "bracket" in T:
         t = "hose_union_bracket"
-    elif "hose union" in T or "wall outlet" in T or "wall elbow" in T:
+    elif "hose union" in T or "wall outlet" in T or "wall elbow" in T or "supply elbow" in T:
         t = "hose_union"
     elif "hand shower bracket" in T or "shower holder" in T:
         t = "hand_bracket"
