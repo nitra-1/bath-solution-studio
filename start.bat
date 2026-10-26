@@ -8,6 +8,8 @@ if not exist .venv (
   .venv\Scripts\python -m pip install --upgrade pip
   .venv\Scripts\pip install -r requirements.txt
 )
+REM Updated copies may need a package the old setup did not install (PDF export).
+.venv\Scripts\python -c "import reportlab" 2>nul || .venv\Scripts\pip install -r requirements.txt
 if "%PORT%"=="" set PORT=8010
 
 :checkport

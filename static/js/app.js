@@ -6,7 +6,7 @@ const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': 
 const uid = () => Math.random().toString(36).slice(2, 9);
 const today = () => new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
 const store = { get(k) { try { return JSON.parse(localStorage.getItem(k)); } catch (e) { return null; } }, set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} } };
-const S = { me: null, meta: null, catalog: null, E: null, project: null, range: store.get('bss.range'), cat: { q: '', brand: '', series: '', category: '' }, review: null, users: null, catalogs: null, poll: null };
+const S = { me: null, meta: null, catalog: null, E: null, project: null, range: store.get('bss.range'), cat: { q: '', brand: '', series: '', category: '' }, review: null, users: null, catalogs: null, poll: null, q: null, qs: { q: '' }, qIdx: null };
 
 /* ---------- helpers ---------- */
 let toastT;
@@ -93,9 +93,9 @@ async function boot() {
 }
 function nav() {
   const h = location.hash;
-  const items = [['#/projects', 'Projects'], ['#/range', 'Range deck'], ['#/catalog', 'Catalog']];
+  const items = [['#/projects', 'Projects'], ['#/quotes', 'Quotations'], ['#/range', 'Range deck'], ['#/catalog', 'Catalog']];
   if (isAdmin()) items.push(['#/admin/catalogs', 'Upload & review'], ['#/admin/users', 'Users'], ['#/admin/settings', 'Settings']);
-  $('#nav').innerHTML = items.map(([href, l]) => `<button type="button" data-href="${href}" aria-selected="${h.startsWith(href) || (href === '#/projects' && h.startsWith('#/project/'))}">${l}</button>`).join('');
+  $('#nav').innerHTML = items.map(([href, l]) => `<button type="button" data-href="${href}" aria-selected="${h.startsWith(href) || (href === '#/projects' && h.startsWith('#/project/')) || (href === '#/quotes' && h.startsWith('#/quote/'))}">${l}</button>`).join('');
   $('#meta').innerHTML = `<a href="#/account" class="muted">${esc(S.me.name)}</a> · <button class="btn ghost" type="button" data-act="logout" style="padding:2px 4px">Sign out</button>`;
 }
 async function route() {
@@ -108,6 +108,9 @@ async function route() {
   try {
     if (h === '/projects') await viewProjects();
     else if ((m = h.match(/^\/project\/(\d+)$/))) await openProject(+m[1]);
+    else if (h === '/quotes') await viewQuotes();
+    else if ((m = h.match(/^\/quote\/new(?:\?c=(\d+))?$/))) await newQuoteView(m[1]);
+    else if ((m = h.match(/^\/quote\/(\d+)$/))) await openQuote(+m[1]);
     else if (h === '/range') viewRange();
     else if (h === '/catalog') viewCatalog();
     else if (h === '/account') viewAccount();
@@ -118,7 +121,14 @@ async function route() {
     else location.hash = '#/projects';
   } catch (e) { $('#main').innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
 }
-window.addEventListener('hashchange', route);
+let lastHash = location.hash;
+window.addEventListener('hashchange', () => {
+  const was = lastHash; lastHash = location.hash;
+  if (S.skipRoute) { S.skipRoute = false; nav(); return; }  // the screen already shows this quotation
+  if (S.q && S.q.dirty && was.startsWith('#/quote/') && !confirm('You have unsaved changes in this quotation. Leave without saving?')) { S.skipRoute = true; location.hash = was; return; }
+  if (S.q && !location.hash.startsWith('#/quote/')) S.q = null;
+  route();
+});
 const noCatalog = () => `<div class="card empty" style="margin-top:16px">No catalogs are published yet. ${isAdmin() ? '<a href="#/admin/catalogs">Upload a price list</a> to get started.' : 'Ask your admin to upload and publish a price list.'}</div>`;
 
 /* ---------- projects ---------- */
@@ -390,6 +400,237 @@ function viewCatalog() {
   </section>`;
 }
 
+/* ---------- quotations ---------- */
+const r2 = x => Math.round((+x + 1e-9) * 100) / 100;
+const num = v => { const n = parseFloat(String(v).replace(/,/g, '')); return isFinite(n) ? n : 0; };
+const inr = n => money(n, 'INR');
+const plain = n => (n === 0 ? '0' : String(r2(n)));
+const fixed = n => r2(n).toFixed(2);
+const qTotal = () => r2(S.q.lines.reduce((a, l) => a + (+l.final || 0), 0));
+let qKey = 0;
+const blankLine = () => ({ k: ++qKey, code: '', title: '', qty: 1, mrp: 0, discount: 0, final: 0, by: 'discount' });
+function recalc(l, by) {  // same rules as the server (app/quotes.py calc_line)
+  const g = Math.max(0, num(l.qty)) * Math.max(0, num(l.mrp));
+  if (by === 'final') { l.by = 'final'; l.final = Math.max(0, num(l.final)); l.discount = g > 0 ? Math.min(100, Math.max(0, r2((1 - l.final / g) * 100))) : 0; }
+  else { l.by = 'discount'; l.discount = Math.min(100, Math.max(0, num(l.discount))); l.final = r2(g * (1 - l.discount / 100)); }
+}
+function newQuote(c) {
+  S.q = { id: null, number: '', rev: 0, latest: 0, customer_id: c ? c.id : null, name: c ? c.name : '', address: c ? c.address : '', phone: c ? c.phone : '', email: c ? c.email : '',
+          notes: '', lines: [blankLine()], revisions: [], dirty: false, saved_at: '', msg: '' };
+}
+function loadQuote(d) {
+  const c = d.data.customer;
+  S.q = { id: d.id, number: d.number, rev: d.rev, latest: d.latest, customer_id: d.customer_id, name: c.name, address: c.address, phone: c.phone, email: c.email, notes: d.data.notes || '',
+          lines: d.data.lines.map(l => ({ ...l, k: ++qKey })), revisions: d.revisions, dirty: false, saved_at: d.saved_at, msg: '' };
+  if (!S.q.lines.length) S.q.lines.push(blankLine());
+}
+async function viewQuotes() {
+  const list = await api('GET', '/api/quotations?q=' + encodeURIComponent(S.qs.q));
+  $('#main').innerHTML = `<div class="row" style="justify-content:space-between"><div><h1>Quotations</h1><p class="lede">Prepare a price quotation for a customer. Every save keeps a revision, so nothing is lost. Quotations can't be deleted.</p></div>
+    <a class="btn primary" href="#/quote/new" style="text-decoration:none">New quotation</a></div>
+    <section class="card" style="margin-top:16px"><div class="room-head"><input type="text" id="q-search" data-qs="q" value="${esc(S.qs.q)}" placeholder="Search customer name, phone or quotation no." style="max-width:360px" autocomplete="off"><div class="sub muted small" id="q-count"></div></div>
+    <div id="q-list"></div></section>`;
+  quoteList(list);
+}
+function quoteList(list) {
+  $('#q-count').textContent = list.length + (list.length === 200 ? '+ ' : ' ') + 'quotations';
+  $('#q-list').innerHTML = list.length ? `<div class="list">${list.map(q => `<div class="li"><div><a href="#/quote/${q.id}">${esc(q.number)} · ${esc(q.name)}</a>
+      <div class="muted small">${esc(q.phone || 'No phone')} · revision ${q.rev} · updated ${esc(q.updated_at || '')}${isAdmin() ? ' · ' + esc(q.owner) : ''}</div></div>
+      <div class="row"><b class="num">${inr(q.total)}</b><a class="btn ghost" href="#/quote/new?c=${q.customer_id}" style="text-decoration:none">New for this customer</a></div></div>`).join('')}</div>`
+    : `<div class="empty">${S.qs.q ? 'No quotation matches that search.' : 'No quotations yet. Start one for a customer.'}</div>`;
+}
+async function openQuote(id, rev) {
+  loadQuote(await api('GET', `/api/quotations/${id}${rev ? '?rev=' + rev : ''}`));
+  renderQuote();
+}
+async function newQuoteView(cid) {
+  let cust = null;
+  if (cid) { const l = await api('GET', `/api/quotations?customer_id=${cid}`); if (l.length) cust = { id: +cid, ...(await api('GET', `/api/quotations/${l[0].id}`)).customer_now }; }
+  newQuote(cust);
+  renderQuote();
+}
+function qRow(l, i) {
+  return `<tr data-k="${l.k}"><td class="n muted small">${i + 1}</td>
+    <td><input type="text" class="mono" data-qf="code" data-k="${l.k}" value="${esc(l.code)}" placeholder="Search code" autocomplete="off" aria-label="Material code"></td>
+    <td><input type="text" data-qf="title" data-k="${l.k}" value="${esc(l.title)}" placeholder="Search product, or type a title" autocomplete="off" aria-label="Product title"></td>
+    <td><input type="text" inputmode="decimal" class="num" data-qf="qty" data-k="${l.k}" value="${plain(l.qty)}" aria-label="Quantity"></td>
+    <td><input type="text" inputmode="decimal" class="num" data-qf="mrp" data-k="${l.k}" value="${fixed(l.mrp)}" aria-label="MRP"></td>
+    <td><input type="text" inputmode="decimal" class="num" data-qf="discount" data-k="${l.k}" value="${plain(l.discount)}" aria-label="Discount percent"></td>
+    <td><input type="text" inputmode="decimal" class="num" data-qf="final" data-k="${l.k}" value="${fixed(l.final)}" aria-label="Final cost"></td>
+    <td><button class="x btn ghost" type="button" data-act="qdel" data-k="${l.k}" aria-label="Remove row">✕</button></td></tr>`;
+}
+function renderQuote() {
+  const Q = S.q, y = window.scrollY, old = Q.rev && Q.rev !== Q.latest;
+  $('#main').innerHTML = `<div class="row" style="justify-content:space-between;align-items:flex-start">
+      <div><a href="#/quotes" class="small">← All quotations</a><h1 style="margin-top:4px">${Q.id ? 'Quotation ' + esc(Q.number) : 'New quotation'}</h1>
+      <p class="lede">Amounts are in INR. Final cost is the row total after discount. Type a discount % to get the final cost, or type a final cost to get the discount %.</p></div>
+      <div class="row" style="align-items:center"><span class="saved" id="savestate"></span>
+      ${Q.revisions.length ? `<label class="field qrevf"><span>Revision</span><select id="q-rev" data-qrev="1" style="width:auto">${Q.revisions.map(r => `<option value="${r.rev}" ${r.rev === Q.rev ? 'selected' : ''}>Rev ${r.rev}${r.rev === Q.latest ? ' (latest)' : ''} · ${esc(r.saved_at)} · ${esc(r.saved_by || '')} · ${inr(r.total)}</option>`).join('')}</select></label>` : ''}</div></div>
+    ${old ? `<div class="warns" style="margin-top:12px"><p>You are looking at revision ${Q.rev}. Saving will create revision ${Q.latest + 1} from what you see here; revision ${Q.latest} stays in the list.</p></div>` : ''}
+    <section class="card" style="margin-top:16px"><div class="proj">
+      <label class="field"><span>Customer name</span><input type="text" id="qc-name" data-qc="name" value="${esc(Q.name)}" autocomplete="off"></label>
+      <label class="field"><span>Phone</span><input type="text" id="qc-phone" data-qc="phone" value="${esc(Q.phone)}" inputmode="tel" autocomplete="off"></label>
+      <label class="field"><span>Address</span><input type="text" id="qc-address" data-qc="address" value="${esc(Q.address)}" autocomplete="off"></label>
+      <label class="field"><span>Email (to send the quotation)</span><input type="text" id="qc-email" data-qc="email" value="${esc(Q.email)}" inputmode="email" autocomplete="off"></label></div>
+      <div id="q-prev" class="muted small" style="padding:0 16px 12px">${Q.id ? 'Changing these details updates the customer record.' : 'Start typing a name or phone to pick an existing customer.'}</div></section>
+    <section class="card" style="margin-top:16px"><div class="tbl"><table class="qt"><thead><tr><th>#</th><th style="min-width:130px">Material code</th><th style="min-width:260px">Product title</th><th class="num" style="width:70px">Qty</th><th class="num" style="width:120px">MRP (₹)</th><th class="num" style="width:90px">Discount %</th><th class="num" style="width:130px">Final cost (₹)</th><th></th></tr></thead>
+      <tbody id="q-body">${Q.lines.map(qRow).join('')}</tbody>
+      <tfoot><tr><td colspan="6" class="num"><b>Total</b></td><td class="num"><b id="q-total">${inr(qTotal())}</b></td><td></td></tr></tfoot></table></div>
+      <div style="padding:12px 16px"><button class="btn" type="button" data-act="qadd">+ Add row</button></div></section>
+    <section class="card" style="margin-top:16px;padding:16px"><label class="field"><span>Notes (shown on the quotation)</span><textarea id="q-notes" data-qc="notes" placeholder="e.g. Prices valid for 15 days. Delivery 2–3 weeks.">${esc(Q.notes)}</textarea></label></section>
+    <div class="sug" id="q-sug" hidden></div>`;
+  $('#totalbar').hidden = false;
+  $('#totalbar').innerHTML = `<div class="wrap"><div><div class="muted small">${Q.lines.filter(l => l.code || l.title).length} items</div><div class="t" id="q-total2">${inr(qTotal())}</div></div>
+    <div class="msg" id="q-msg"></div>
+    <div class="row qbtns"><button class="btn primary" type="button" data-act="qsave">Save</button>
+      <button class="btn" type="button" data-act="qxlsx">Excel</button><button class="btn" type="button" data-act="qpdf">PDF</button><button class="btn" type="button" data-act="qprint">Print</button>
+      <button class="btn" type="button" data-act="qemail">Email</button><button class="btn" type="button" data-act="qwa">WhatsApp</button>
+      ${Q.id ? '<button class="btn ghost" type="button" data-act="qcopy">Copy to new quotation</button>' : ''}</div></div>`;
+  qState();
+  window.scrollTo(0, y);
+}
+function qState() {
+  const Q = S.q; if (!Q) return;
+  const t = Q.msg || (Q.dirty ? 'Unsaved changes' : Q.id ? `Saved · revision ${Q.rev}${Q.saved_at ? ' · ' + Q.saved_at : ''}` : '');
+  const a = $('#savestate'), b = $('#q-msg'); if (a) a.textContent = t; if (b) b.textContent = Q.dirty ? 'Unsaved changes' : '';
+}
+function qTotals() { const t = inr(qTotal()); const a = $('#q-total'), b = $('#q-total2'); if (a) a.textContent = t; if (b) b.textContent = t; }
+const qLine = k => S.q.lines.find(l => l.k === +k);
+const qDirty = () => { S.q.dirty = true; S.q.msg = ''; qState(); };
+function quoteInput(t) {
+  const d = t.dataset;
+  if (d.qc) {
+    S.q[d.qc] = t.value; qDirty();
+    if ((d.qc === 'name' || d.qc === 'phone') && !S.q.id) { S.q.customer_id = null; clearTimeout(S.qt); S.qt = setTimeout(() => suggestCustomers(t), 250); }
+    return;
+  }
+  const l = qLine(d.k); if (!l) return;
+  const f = d.qf;
+  if (f === 'code' || f === 'title') { l[f] = t.value; qDirty(); suggestProducts(t, l); return; }
+  l[f] = num(t.value);
+  if (f === 'qty' || f === 'mrp' || f === 'discount') recalc(l, 'discount'); else recalc(l, 'final');
+  const tr = t.closest('tr');
+  for (const g of ['discount', 'final']) if (g !== f) { const el = tr.querySelector(`[data-qf="${g}"]`); el.value = g === 'final' ? fixed(l.final) : plain(l.discount); }
+  qDirty(); qTotals();
+}
+/* product search: material code and title */
+function qIndex() {
+  if (S.qIdx) return S.qIdx;
+  S.qIdx = S.catalog.products.flatMap(p => p.variants.map(v => ({ art: v.art, title: v.finish ? `${p.name} – ${v.finish}` : p.name, brand: p.brand, series: p.series, price: v.price, cur: p.currency,
+    hay: (v.art + ' ' + v.art.replace(/ /g, '') + ' ' + p.name + ' ' + v.finish + ' ' + p.series + ' ' + p.brand).toLowerCase() })));
+  return S.qIdx;
+}
+function showSug(el, html) {
+  const s = $('#q-sug'); if (!s) return;
+  if (!html || !el) { s.hidden = true; return; }
+  const r = el.getBoundingClientRect(); s.innerHTML = html; s.hidden = false; s.dataset.sel = '0';
+  s.style.left = Math.max(8, Math.min(r.left, innerWidth - 420)) + 'px'; s.style.top = (r.bottom + scrollY + 2) + 'px';
+  if (s.firstElementChild) s.firstElementChild.classList.add('on');
+}
+function suggestProducts(el, l) {
+  const q = el.value.trim().toLowerCase(); S.qsug = { type: 'product', k: l.k, items: [] };
+  if (q.length < 2) return showSug(el, '');
+  const toks = q.split(/\s+/).map(x => x.replace(/ /g, '')), idx = qIndex(), hits = [];
+  for (const e of idx) { if (toks.every(x => e.hay.includes(x))) { hits.push(e); if (hits.length >= 60) break; } }
+  const starts = e => e.art.toLowerCase().replace(/ /g, '').startsWith(toks[0]) ? 1 : 0;
+  hits.sort((a, b) => starts(b) - starts(a));
+  S.qsug.items = hits.slice(0, 10);
+  showSug(el, S.qsug.items.length ? S.qsug.items.map((e, i) => `<div class="si" data-si="${i}"><span class="mono">${esc(e.art)}</span> ${esc(e.title)}<div class="muted small">${esc(e.brand)} · ${esc(e.series)}</div></div>`).join('')
+    : `<div class="si muted">No product found. You can type the code and title yourself.</div>`);
+}
+async function suggestCustomers(el) {
+  const q = el.value.trim(); S.qsug = { type: 'customer', items: [] };
+  if (q.length < 2) return showSug(el, '');
+  try {
+    const items = await api('GET', '/api/customers?q=' + encodeURIComponent(q));
+    if (el.value.trim() !== q) return;  // the user kept typing
+    S.qsug.items = items;
+    showSug(el, items.length ? items.map((c, i) => `<div class="si" data-si="${i}"><b>${esc(c.name)}</b> <span class="muted">${esc(c.phone)}</span><div class="muted small">${esc(c.address)}</div></div>`).join('') : '');
+  } catch (e) { showSug(el, ''); }
+}
+async function pickSug(i) {
+  const g = S.qsug; if (!g || !g.items[i]) return;
+  if (g.type === 'product') {
+    const e = g.items[i], l = qLine(g.k); l.code = e.art; l.title = e.title;
+    if (e.cur === 'INR' && e.price) l.mrp = e.price;   // only an INR catalog price is used; other currencies are not converted
+    recalc(l, 'discount');
+    if (S.q.lines[S.q.lines.length - 1] === l) S.q.lines.push(blankLine());
+    S.q.dirty = true; renderQuote();
+    const q = document.querySelector(`[data-k="${l.k}"][data-qf="qty"]`); if (q) q.select();
+  } else {
+    const c = g.items[i]; Object.assign(S.q, { customer_id: c.id, name: c.name, address: c.address, phone: c.phone, email: c.email, dirty: true });
+    renderQuote();
+    api('GET', '/api/quotations?customer_id=' + c.id).then(l => { const el = $('#q-prev'); if (el) el.innerHTML = l.length ? `Existing customer · earlier quotations: ${l.slice(0, 6).map(x => `<a href="#/quote/${x.id}">${esc(x.number)}</a>`).join(', ')}` : 'Existing customer · no earlier quotations.'; });
+  }
+}
+function sugKey(e) {
+  const s = $('#q-sug'); if (!s || s.hidden) return;
+  const items = [...s.querySelectorAll('[data-si]')], cur = +s.dataset.sel || 0;
+  if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); const n = Math.max(0, Math.min(items.length - 1, cur + (e.key === 'ArrowDown' ? 1 : -1))); items.forEach((x, i) => x.classList.toggle('on', i === n)); s.dataset.sel = n; }
+  else if (e.key === 'Enter' && items.length) { e.preventDefault(); pickSug(cur); }
+  else if (e.key === 'Escape') s.hidden = true;
+}
+/* save and share */
+function qPayload() {
+  const Q = S.q;
+  return { customer_id: Q.customer_id, name: Q.name, address: Q.address, phone: Q.phone, email: Q.email, notes: Q.notes, latest_seen: Q.id ? Q.latest : null,
+           lines: Q.lines.map(l => ({ code: l.code, title: l.title, qty: num(l.qty), mrp: num(l.mrp), discount: num(l.discount), final: num(l.final), by: l.by })) };
+}
+async function saveQuote() {
+  const Q = S.q; if (!Q.name.trim()) { toast('Enter the customer name first.'); const el = $('#qc-name'); if (el) el.focus(); return false; }
+  const d = Q.id ? await api('PUT', `/api/quotations/${Q.id}`, qPayload()) : await api('POST', '/api/quotations', qPayload());
+  const fresh = !Q.id; loadQuote(d); S.q.msg = `Saved as revision ${d.rev}`;
+  if (fresh) { S.skipRoute = true; location.hash = `#/quote/${d.id}`; }
+  renderQuote(); toast(`Saved ${d.number} · revision ${d.rev}`); return true;
+}
+async function ensureSaved() { if (S.q.dirty || !S.q.id) return saveQuote(); return true; }
+async function fileOf(kind) {
+  const Q = S.q, r = await fetch(`/api/quotations/${Q.id}/${kind}?rev=${Q.rev}`, { credentials: 'same-origin' });
+  if (!r.ok) { let m = `Could not make the ${kind} (${r.status})`; try { m = (await r.json()).error || m; } catch (e) {} throw new Error(m); }
+  download(`${Q.number}-rev${Q.rev}.${kind}`, await r.blob());
+}
+function qSummary(max) {
+  const Q = S.q, dealer = S.me.settings.dealer || '', items = Q.lines.filter(l => l.code || l.title);
+  const rows = items.slice(0, max).map((l, i) => `${i + 1}. ${l.title || l.code}${l.title && l.code ? ' (' + l.code + ')' : ''} × ${plain(l.qty)} = ${inr(l.final)}`);
+  if (items.length > max) rows.push(`…and ${items.length - max} more (see the attached PDF)`);
+  return `Quotation ${Q.number} (revision ${Q.rev})${dealer ? ' from ' + dealer : ''}\nFor: ${Q.name}\n\n${rows.join('\n')}\n\nTotal: ${inr(qTotal())}${Q.notes ? '\n\n' + Q.notes : ''}`;
+}
+function waNumber(p) { let d = String(p || '').replace(/\D/g, ''); if (d.length === 11 && d[0] === '0') d = d.slice(1); return d.length === 10 ? '91' + d : d; }
+function printQuote() {
+  const Q = S.q, st = S.me.settings;
+  $('#printarea').innerHTML = `<h2>${esc(st.dealer || 'Quotation')}</h2><p>Quotation <b>${esc(Q.number)}</b> · revision ${Q.rev} · ${esc(Q.saved_at)}</p>
+    <p><b>${esc(Q.name)}</b><br>${esc(Q.address)}${Q.phone ? '<br>Phone: ' + esc(Q.phone) : ''}</p>
+    <table><thead><tr><th>Material code</th><th>Product title</th><th class="num">Qty</th><th class="num">MRP (₹)</th><th class="num">Discount</th><th class="num">Final cost (₹)</th></tr></thead><tbody>
+    ${Q.lines.filter(l => l.code || l.title).map(l => `<tr><td>${esc(l.code)}</td><td>${esc(l.title)}</td><td class="num">${plain(l.qty)}</td><td class="num">${inr(l.mrp)}</td><td class="num">${l.discount ? plain(l.discount) + '%' : '-'}</td><td class="num">${inr(l.final)}</td></tr>`).join('')}
+    </tbody><tfoot><tr><td colspan="5" class="num"><b>Total</b></td><td class="num"><b>${inr(qTotal())}</b></td></tr></tfoot></table>${Q.notes ? `<p style="white-space:pre-wrap"><b>Notes</b><br>${esc(Q.notes)}</p>` : ''}<p class="muted small">All amounts in INR.</p>`;
+  window.print();
+}
+async function quoteAct(a, t) {
+  const Q = S.q;
+  if (a === 'qadd') { Q.lines.push(blankLine()); renderQuote(); const l = Q.lines[Q.lines.length - 1]; const el = document.querySelector(`[data-k="${l.k}"][data-qf="code"]`); if (el) el.focus(); }
+  else if (a === 'qdel') { Q.lines = Q.lines.filter(l => l.k !== +t.dataset.k); if (!Q.lines.length) Q.lines.push(blankLine()); Q.dirty = true; renderQuote(); }
+  else if (a === 'qsave') await saveQuote();
+  else if (a === 'qcopy') { const c = Q; newQuote(null); S.q.lines = c.lines.map(l => ({ ...l, k: ++qKey })); S.q.notes = c.notes; S.q.dirty = true; S.skipRoute = true; location.hash = '#/quote/new'; renderQuote(); toast('Copied. Choose the customer and save to create a new quotation.'); }
+  else if (a === 'qxlsx' || a === 'qpdf') { if (await ensureSaved()) await fileOf(a === 'qxlsx' ? 'xlsx' : 'pdf'); }
+  else if (a === 'qprint') { if (await ensureSaved()) printQuote(); }
+  else if (a === 'qemail') {
+    if (!(await ensureSaved())) return;
+    await fileOf('pdf');
+    const subj = `Quotation ${S.q.number}${S.me.settings.dealer ? ' from ' + S.me.settings.dealer : ''}`;
+    location.href = `mailto:${encodeURIComponent(S.q.email.trim())}?subject=${encodeURIComponent(subj)}&body=${encodeURIComponent(qSummary(25) + '\n\n(The PDF was downloaded to your computer. Please attach it before sending.)')}`;
+    toast('The PDF was downloaded. Attach it in the email that just opened.');
+  }
+  else if (a === 'qwa') {
+    const to = waNumber(Q.phone); if (!to) { toast('Add the customer phone number first.'); return; }
+    const w = window.open('', '_blank');
+    try { if (!(await ensureSaved())) { if (w) w.close(); return; } await fileOf('pdf'); }
+    catch (e) { if (w) w.close(); throw e; }
+    const url = `https://wa.me/${to}?text=${encodeURIComponent(qSummary(15))}`;
+    if (w) w.location.href = url; else location.href = url;
+    toast('The PDF was downloaded. Attach it in the WhatsApp chat that opened.');
+  }
+}
+
 /* ---------- account ---------- */
 function viewAccount() {
   $('#main').innerHTML = `<h1>Your account</h1><p class="lede">${esc(S.me.name)} · ${esc(S.me.email)} · ${S.me.role === 'admin' ? 'Admin' : 'Sales'}</p>
@@ -625,6 +866,7 @@ document.addEventListener('click', async e => {
     else if (a === 'acceptflag') { await api('POST', `/api/variants/${t.dataset.vid}/accept`); const p = S.review.products.find(x => x.variants.some(v => v.id === +t.dataset.vid)); const v = p.variants.find(v => v.id === +t.dataset.vid); v.flags = []; t.closest('td').innerHTML = ''; toast('Warning cleared'); }
     else if (a === 'pickimg') { const inp = $('#imgpick'); inp.dataset.pid = t.dataset.pid; inp.value = ''; inp.click(); }
     else if (a === 'resetpw') { const pw = Math.random().toString(36).slice(2, 6) + '-' + Math.random().toString(36).slice(2, 6); if (confirmBtn(t, 'Confirm reset')) { await api('PATCH', `/api/users/${t.dataset.id}`, { password: pw }); t.closest('.li').querySelector('.muted').insertAdjacentHTML('beforeend', ` · New password: <b class="mono">${pw}</b>`); } }
+    else if (/^q(add|del|save|copy|xlsx|pdf|print|email|wa)$/.test(a)) await quoteAct(a, t);
     else if (a === 'toggleuser') { await api('PATCH', `/api/users/${t.dataset.id}`, { active: t.dataset.active !== '1' }); viewUsers(); }
   } catch (err) { toast(err.message); }
 });
@@ -640,6 +882,7 @@ document.addEventListener('change', async e => {
       toast('Photo updated'); return;
     }
     if (t.closest('form.pform')) { t.closest('form.pform').classList.add('dirty'); return; }
+    if (d.qrev) { if (S.q.dirty && !confirm('Discard your unsaved changes and open that revision?')) { renderQuote(); return; } await openQuote(S.q.id, +t.value); return; }
     if (d.f && d.room && d.f !== 'name') {
       const r = roomOf(t); let v = t.value; if (/count|head/.test(d.f)) v = +v; setPath(r, d.f, v);
       if (d.f === 'brand') Object.assign(r, defaultsFor(v));
@@ -662,6 +905,8 @@ document.addEventListener('change', async e => {
 document.addEventListener('input', e => {
   const t = e.target, d = t.dataset;
   if (t.closest('form.pform')) { t.closest('form.pform').classList.add('dirty'); return; }
+  if (d.qf || d.qc) { quoteInput(t); return; }
+  if (d.qs) { S.qs.q = t.value; clearTimeout(S.qst); S.qst = setTimeout(async () => { try { quoteList(await api('GET', '/api/quotations?q=' + encodeURIComponent(S.qs.q))); } catch (err) { toast(err.message); } }, 250); return; }
   if (d.p && S.project) { S.project[d.p] = t.value; saveSoon(); }
   else if (d.f === 'name' && S.project) { roomOf(t).name = t.value; saveSoon(); }
   else if (d.rt) { S.range[d.rt] = t.value; store.set('bss.range', S.range); }
@@ -672,7 +917,9 @@ document.addEventListener('submit', e => {
   const f = e.target.closest('form.pform');
   if (f) { e.preventDefault(); saveProduct(f); }
 });
-window.addEventListener('beforeunload', e => { if (document.querySelector('form.pform.dirty')) { e.preventDefault(); e.returnValue = ''; } });
+document.addEventListener('keydown', sugKey);
+document.addEventListener('mousedown', e => { const si = e.target.closest('[data-si]'); if (si) { e.preventDefault(); pickSug(+si.dataset.si); } else if (!e.target.closest('#q-sug') && $('#q-sug')) $('#q-sug').hidden = true; });
+window.addEventListener('beforeunload', e => { if (document.querySelector('form.pform.dirty') || (S.q && S.q.dirty)) { e.preventDefault(); e.returnValue = ''; } });
 
 boot().catch(e => { $('#main').innerHTML = `<div class="empty">Could not reach the server: ${esc(e.message)}</div>`; });
 })();

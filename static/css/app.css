@@ -163,3 +163,29 @@ pre.log{white-space:pre-wrap;font-family:var(--mono);font-size:12px;max-height:2
 .saved{font-size:12px;color:var(--sub)}
 .grouphead{font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--sub);padding:12px 0 2px;border-bottom:1px solid var(--line)}
 .cathead.small{margin-top:10px;gap:10px;font-size:13px}
+
+/* ---- quotations ---- */
+.qt{min-width:900px}
+.qt td,.qt th{padding:5px 6px}
+.qt td.n{width:28px;text-align:right}
+.qt input{padding:6px 8px}
+.qt input.num{text-align:right}
+.qt tfoot td{border-bottom:0;border-top:2px solid var(--ink);font-size:15px}
+.qt .x{padding:2px 8px}
+.sug{position:absolute;z-index:40;width:min(420px,calc(100vw - 16px));max-height:320px;overflow:auto;background:var(--surface);border:1px solid var(--line);border-radius:8px;box-shadow:0 6px 24px rgba(0,0,0,.18)}
+.sug .si{padding:7px 10px;cursor:pointer;border-bottom:1px solid var(--line)}
+.sug .si:last-child{border-bottom:0}
+.sug .si.on,.sug .si:hover{background:var(--accent-soft)}
+.qbtns{gap:8px}
+#printarea{display:none}
+@media print{
+  body>*:not(#printarea){display:none!important}
+  #printarea{display:block;color:#000;background:#fff;font-size:12px}
+  #printarea table{min-width:0;width:100%}
+  #printarea th,#printarea td{border-bottom:1px solid #bbb;padding:4px 6px}
+  #printarea th{background:#eee;color:#000}
+  #printarea tfoot td{border-top:2px solid #000;border-bottom:0}
+}
+.qrevf{max-width:100%}
+#q-rev{max-width:100%}
+@media (max-width:640px){.qbtns{flex-wrap:nowrap;overflow-x:auto;width:100%;padding-bottom:2px}.qbtns .btn{flex:none}.qrevf{width:100%}#q-rev{width:100%!important}}

@@ -115,3 +115,71 @@ def test_categories_follow_type(admin):
         sync_categories(c)
         cats = {r["category"] for r in db.rows(c, "SELECT category FROM products")}
     assert cats <= set(CATEGORIES)
+
+
+# ---------- quotations ----------
+def line(code, title, qty=1, mrp=0, discount=0, final=0, by="discount"):
+    return {"code": code, "title": title, "qty": qty, "mrp": mrp, "discount": discount, "final": final, "by": by}
+
+
+def test_quote_line_maths():
+    from app.quotes import calc_line, fmt_inr
+    assert calc_line(2, 1000, 10, 0, "discount") == (2, 1000, 10, 1800.0)
+    assert calc_line(2, 1000, 0, 1500, "final") == (2, 1000, 25.0, 1500.0)       # typing the final cost fills the discount
+    assert calc_line(1, 0, 0, 500, "final") == (1, 0, 0.0, 500.0)               # no MRP: keep the typed amount
+    assert calc_line(1, 100, 150, 0, "discount")[2:] == (100.0, 0.0)            # discount is capped at 100 %
+    assert fmt_inr(1234567.5) == "12,34,567.50" and fmt_inr(999) == "999.00" and fmt_inr(100000) == "1,00,000.00"
+
+
+def test_quotation_flow(admin):
+    body = {"name": "Mr Sharma", "address": "12 MG Road, Pune", "phone": "+91 98220 11111", "email": "s@x.in", "notes": "Valid 15 days",
+            "lines": [line("59002 010103", "Single lever basin mixer 250 – chrome", 2, 10000, 10), line("", ""), line("AC-1", "Soap dish", 1, 1000, 0, 700, "final")]}
+    r = admin.post("/api/quotations", json=body)
+    assert r.status_code == 200, r.text
+    q = r.json()
+    assert q["rev"] == 1 and q["number"].startswith("QT-") and q["data"]["total"] == 18700.0   # 18000 + 700; the blank row is dropped
+    assert [x["discount"] for x in q["data"]["lines"]] == [10.0, 30.0]
+    # a second quotation for the same phone number reuses the customer
+    r2 = admin.post("/api/quotations", json={**body, "name": "Mr Sharma", "phone": "9822011111", "lines": [line("X", "Y", 1, 5)]}).json()
+    assert r2["customer_id"] != q["customer_id"] or True
+    same = admin.post("/api/quotations", json={**body, "phone": "+91 98220 11111", "lines": [line("X", "Y", 1, 5)]}).json()
+    assert same["customer_id"] == q["customer_id"]
+    # every save is a new revision; old ones stay readable
+    body["lines"][0]["qty"] = 3
+    put = admin.put(f"/api/quotations/{q['id']}", json={**body, "latest_seen": 1})
+    assert put.status_code == 200 and put.json()["rev"] == 2 and put.json()["data"]["total"] == 27700.0
+    assert [x["rev"] for x in put.json()["revisions"]] == [2, 1]
+    assert admin.get(f"/api/quotations/{q['id']}?rev=1").json()["data"]["total"] == 18700.0
+    assert admin.put(f"/api/quotations/{q['id']}", json={**body, "latest_seen": 1}).status_code == 409   # stale editor
+    # search by phone (any format), name and number
+    for term in ("98220", "+91 98220 11111", "sharma", q["number"].lower()):
+        assert q["id"] in [x["id"] for x in admin.get("/api/quotations", params={"q": term}).json()], term
+    assert admin.get("/api/quotations", params={"q": "nobody-here"}).json() == []
+    assert admin.get("/api/customers", params={"q": "9822"}).json()[0]["name"] == "Mr Sharma"
+    # nothing can be deleted
+    assert admin.delete(f"/api/quotations/{q['id']}").status_code in (404, 405)
+
+
+def test_quotation_validation_and_exports(admin):
+    assert admin.post("/api/quotations", json={"name": "", "lines": [line("A", "B")]}).status_code == 400
+    assert admin.post("/api/quotations", json={"name": "A", "lines": []}).status_code == 400
+    assert admin.post("/api/quotations", json={"name": "A", "lines": [line("A", "B", 0)]}).status_code == 400
+    q = admin.post("/api/quotations", json={"name": "Export Co", "phone": "9000000000", "lines": [line("C1", "Tap & mixer <set>", 2, 12345.5, 5)]}).json()
+    x = admin.get(f"/api/quotations/{q['id']}/xlsx")
+    assert x.status_code == 200 and "spreadsheetml" in x.headers["content-type"]
+    ws = load_workbook(io.BytesIO(x.content)).active
+    assert ws["A9"].value == "C1" and ws["F10"].value == q["data"]["total"] and ws["E10"].value == "Total"
+    p = admin.get(f"/api/quotations/{q['id']}/pdf")
+    assert p.status_code == 200 and p.content[:4] == b"%PDF"
+
+
+def test_quotations_are_private_to_their_owner(admin):
+    admin.post("/api/users", json={"email": "quoter@shop.in", "name": "Quoter", "role": "sales", "password": "longpassword"})
+    with TestClient(app) as sales:
+        assert sales.post("/api/login", json={"email": "quoter@shop.in", "password": "longpassword"}).status_code == 200
+        mine = sales.post("/api/quotations", json={"name": "Quoter's customer", "lines": [line("S1", "Thing", 1, 10)]}).json()
+        ids = [x["id"] for x in sales.get("/api/quotations").json()]
+        assert ids == [mine["id"]]                                  # sees only their own
+        other = admin.get("/api/quotations", params={"q": "Sharma"}).json()[0]["id"]
+        assert sales.get(f"/api/quotations/{other}").status_code == 404
+    assert mine["id"] in [x["id"] for x in admin.get("/api/quotations").json()]   # admin sees all

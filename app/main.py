@@ -13,7 +13,7 @@ from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from . import auth, db
+from . import auth, db, quotes
 from .extract import ingest, profiles
 from .taxonomy import CATEGORIES, FINISHES, GROUPS, TYPE_CAT, TYPES, finish_key, sync_categories
 
@@ -32,6 +32,7 @@ async def lifespan(_app):
 
 
 app = FastAPI(title="Bath Solution Studio", version=VERSION, docs_url=None, redoc_url=None, lifespan=lifespan)
+app.include_router(quotes.router)
 
 
 @app.exception_handler(HTTPException)

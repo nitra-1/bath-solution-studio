@@ -12,6 +12,7 @@ Local-network sales tool for a bath/sanitary showroom. The owner (Nitin) is not 
 - `scripts/try_reader.py` — run a reader on a PDF outside the app; `--dump-page N` shows words with font/size/position.
 - `app/extract/validate.py` — review flags. Admin can accept flags (`variants.accepted`).
 - `app/extract/ingest.py` — background thread: parse → classify → validate → store (status `review`). Also the Excel template writer/reader.
+- `app/quotes.py` — quotations: customers, quotations, **revisions** (every Save adds one; there is deliberately no delete), Excel (openpyxl) and PDF (reportlab) export. Amounts are INR. `calc_line()` holds the discount/final-cost rules; the browser copy is `recalc()` in `app.js`.
 - `static/js/engine.js` — room → product list rules (`buildRoom`), alternatives, range deck grouping. Shared shape with the original prototype.
 - `static/js/deck.js` — PptxGenJS slide builders (`buildSolution`, `buildRange`).
 - `static/js/app.js` — the whole UI: hash router, sales screens, admin screens.

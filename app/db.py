@@ -53,6 +53,21 @@ CREATE TABLE IF NOT EXISTS projects (
   created_at TEXT DEFAULT CURRENT_TIMESTAMP, updated_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
 CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT);
+CREATE TABLE IF NOT EXISTS customers (
+  id INTEGER PRIMARY KEY, name TEXT NOT NULL, address TEXT NOT NULL DEFAULT '', phone TEXT NOT NULL DEFAULT '',
+  phone_digits TEXT NOT NULL DEFAULT '', email TEXT NOT NULL DEFAULT '', created_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE IF NOT EXISTS quotations (
+  id INTEGER PRIMARY KEY, number TEXT NOT NULL DEFAULT '', customer_id INTEGER NOT NULL REFERENCES customers(id),
+  owner_id INTEGER NOT NULL REFERENCES users(id), rev INTEGER NOT NULL DEFAULT 1, total REAL NOT NULL DEFAULT 0,
+  created_at TEXT, updated_at TEXT
+);
+CREATE TABLE IF NOT EXISTS quotation_revisions (
+  id INTEGER PRIMARY KEY, quotation_id INTEGER NOT NULL REFERENCES quotations(id), rev INTEGER NOT NULL,
+  data TEXT NOT NULL, saved_by INTEGER REFERENCES users(id), saved_at TEXT, UNIQUE (quotation_id, rev)
+);
+CREATE INDEX IF NOT EXISTS ix_customers_phone ON customers(phone_digits);
+CREATE INDEX IF NOT EXISTS ix_quotations_customer ON quotations(customer_id);
 CREATE INDEX IF NOT EXISTS ix_products_catalog ON products(catalog_id);
 CREATE INDEX IF NOT EXISTS ix_variants_product ON variants(product_id);
 """

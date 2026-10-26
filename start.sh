@@ -8,6 +8,8 @@ if [ ! -d .venv ]; then
   .venv/bin/pip install --upgrade pip >/dev/null
   .venv/bin/pip install -r requirements.txt
 fi
+# Updated copies may need a package the old setup did not install (PDF export).
+.venv/bin/python -c "import reportlab" 2>/dev/null || .venv/bin/pip install -r requirements.txt
 PORT="${PORT:-8010}"
 while .venv/bin/python -c "import socket,sys; s=socket.socket(); sys.exit(0 if s.connect_ex(('127.0.0.1', $PORT)) == 0 else 1)"; do
   echo "Port $PORT is already used by another program. Trying the next one…"
