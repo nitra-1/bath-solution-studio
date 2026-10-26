@@ -134,7 +134,7 @@
         const prods = P.filter(p => p.brand === o.brand && p.series === s && o.categories.includes(p.category) && !(o.exclude || []).includes(p.id))
           .map((p, i) => [p, i]).sort((a, b) => catRank(a[0].category) - catRank(b[0].category) || a[1] - b[1]).map(x => x[0])
           .map(p => {
-            const vs = p.variants.filter(v => o.finishes.includes(v.finish_key));
+            const vs = o.finishes.length ? p.variants.filter(v => o.finishes.includes(v.finish_key)) : p.variants;  // none ticked = every finish
             return {
               ...p, variants: vs.length ? vs : p.variants.slice(0, 1),
               specGroups: p.specs.filter(g => g.items.length),

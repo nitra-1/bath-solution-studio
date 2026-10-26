@@ -164,6 +164,8 @@
   }
 
   /* ---------- Brand range deck ---------- */
+  // overview layouts: products per slide, columns, rows (the card height keeps the 6-up look unchanged)
+  const GRIDS = { grid: { per: 6, cols: 3, rows: 2 }, grid4: { per: 4, cols: 2, rows: 2 }, grid2: { per: 2, cols: 2, rows: 1 } };
   function buildRange(pptx, sel, img) {
     pptx.layout = 'LAYOUT_WIDE';
     pptx.title = sel.title;
@@ -211,31 +213,32 @@
           gd.addText([...new Set(part.products.map(p => p.category))].join('   ·   ') + `   ·   ${part.products.length} products`, { x: 0.8, y: 3.95, w: 11.5, h: 0.5, fontFace: FONT, fontSize: 14, color: C.sub, margin: 0 });
           n++;
         }
-      if (sel.layout === 'grid') {
-        // overview: up to 6 per slide; each category starts on its own slide
-        const per = 6;
+      if (GRIDS[sel.layout]) {
+        // overview: 2, 4 or 6 per slide; each category starts on its own slide
+        const G = GRIDS[sel.layout], per = G.per;
         const byCat = [];
         part.products.forEach(p => { let e = byCat.find(x => x.cat === p.category); if (!e) byCat.push(e = { cat: p.category, list: [] }); e.list.push(p); });
         byCat.forEach(({ cat, list }) => { for (let p = 0; p < Math.ceil(list.length / per); p++) {
           const s = pptx.addSlide();
           const chunk = list.slice(p * per, p * per + per);
           header(s, `${sel.brand} ${g.series}${part.group ? '  ·  ' + part.group : ''}`, cat + (p ? ' (continued)' : ''));
-          const cw = 3.98, ch = 2.62, gx = 0.18, gy = 0.2;
+          const gx = 0.18, gy = 0.2, cw = (12.33 - gx * (G.cols - 1)) / G.cols, ch = G.rows === 2 ? 2.62 : 2 * 2.62 + gy;
+          const imW = G.cols === 3 ? 1.7 : (G.rows === 1 ? 3.0 : 2.3), big = per < 6, nSpecs = per === 2 ? 6 : per === 4 ? 4 : 3;
           chunk.forEach((pr, i) => {
-            const cx = 0.5 + (i % 3) * (cw + gx), cy = 1.55 + Math.floor(i / 3) * (ch + gy);
+            const cx = 0.5 + (i % G.cols) * (cw + gx), cy = 1.55 + Math.floor(i / G.cols) * (ch + gy);
             s.addShape('rect', { x: cx, y: cy, w: cw, h: ch, fill: { color: C.white }, line: { color: C.line, width: 0.75 } });
-            s.addShape('rect', { x: cx, y: cy, w: 1.7, h: ch, fill: { color: C.mist }, line: { color: C.mist } });
-            pic(s, img(pr.image), { x: cx + 0.12, y: cy + 0.2, w: 1.46, h: ch - 0.4, sizing: { type: 'contain', w: 1.46, h: ch - 0.4 } });
+            s.addShape('rect', { x: cx, y: cy, w: imW, h: ch, fill: { color: C.mist }, line: { color: C.mist } });
+            pic(s, img(pr.image), { x: cx + 0.12, y: cy + 0.2, w: imW - 0.24, h: ch - 0.4, sizing: { type: 'contain', w: imW - 0.24, h: ch - 0.4 } });
             const base = pr.variants[0];
             const minP = Math.min(...pr.variants.map(v => v.price));
             s.addText([
               { text: pr.category.toUpperCase(), options: { fontSize: 8, bold: true, color: C.accent, charSpacing: 1, breakLine: true } },
-              { text: pr.name, options: { fontSize: 12, bold: true, color: C.ink, breakLine: true } },
-              { text: pr.keySpecs.slice(0, 3).join('\n'), options: { fontSize: 9, color: C.sub, breakLine: true } },
-              { text: 'Art. ' + base.art + (pr.variants.length > 1 ? `  +${pr.variants.length - 1} finishes` : ''), options: { fontSize: 9, color: C.sub } }
-            ], { x: cx + 1.82, y: cy + 0.15, w: cw - 1.95, h: ch - 0.75, fontFace: FONT, valign: 'top', margin: 0, paraSpaceAfter: 3 });
-            [...new Set(pr.variants.map(v => v.finish_key))].forEach((k2, k) => swatch(s, k2, cx + 1.82 + k * 0.27, cy + ch - 0.5, 0.2));
-            if (sel.showPrices) s.addText('from ' + money(minP), { x: cx + 1.82, y: cy + ch - 0.32, w: cw - 1.95, h: 0.24, fontFace: FONT, fontSize: 10, bold: true, color: C.ink, align: 'right', margin: 0 });
+              { text: pr.name, options: { fontSize: big ? (per === 2 ? 16 : 13) : 12, bold: true, color: C.ink, breakLine: true } },
+              { text: (pr.keySpecs.length || !big ? pr.keySpecs : pr.specGroups.flatMap(gp => gp.items)).slice(0, nSpecs).join('\n'), options: { fontSize: big ? (per === 2 ? 11 : 10) : 9, color: C.sub, breakLine: true } },
+              { text: 'Art. ' + base.art + (pr.variants.length > 1 ? `  +${pr.variants.length - 1} finishes` : ''), options: { fontSize: big ? 10 : 9, color: C.sub } }
+            ], { x: cx + imW + 0.12, y: cy + 0.15, w: cw - imW - 0.25, h: ch - 0.75, fontFace: FONT, valign: 'top', margin: 0, paraSpaceAfter: 3 });
+            [...new Set(pr.variants.map(v => v.finish_key))].forEach((k2, k) => swatch(s, k2, cx + imW + 0.12 + k * 0.27, cy + ch - 0.5, 0.2));
+            if (sel.showPrices) s.addText('from ' + money(minP), { x: cx + imW + 0.12, y: cy + ch - 0.32, w: cw - imW - 0.25, h: 0.24, fontFace: FONT, fontSize: 10, bold: true, color: C.ink, align: 'right', margin: 0 });
           });
           footer(s, foot, n++);
         } });

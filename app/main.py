@@ -9,7 +9,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, Response, UploadFile
-from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -590,4 +590,9 @@ app.mount("/static", StaticFiles(directory=STATIC), name="static")
 
 @app.get("/")
 def index():
-    return FileResponse(STATIC / "index.html", headers={"Cache-Control": "no-cache"})
+    """index.html with each script/style link stamped with the file's date, so an updated copy never runs stale browser-cached code."""
+    def stamp(m):
+        f = STATIC / m.group(2)
+        return f'{m.group(1)}{m.group(2)}?v={int(f.stat().st_mtime) if f.exists() else 0}"'
+    html = re.sub(r'(/static/)((?:js|css|vendor)/[\w.\-]+\.(?:js|css))"', stamp, (STATIC / "index.html").read_text(encoding="utf-8"))
+    return HTMLResponse(html, headers={"Cache-Control": "no-cache"})

@@ -183,3 +183,12 @@ def test_quotations_are_private_to_their_owner(admin):
         other = admin.get("/api/quotations", params={"q": "Sharma"}).json()[0]["id"]
         assert sales.get(f"/api/quotations/{other}").status_code == 404
     assert mine["id"] in [x["id"] for x in admin.get("/api/quotations").json()]   # admin sees all
+
+
+def test_index_links_carry_a_version(admin):
+    """Script and style links get ?v=<file date>, so an updated copy never runs stale cached code."""
+    import re
+    html = admin.get("/").text
+    links = re.findall(r'/static/[^"]+\.(?:js|css)\?v=\d+', html)
+    assert any("/js/app.js?v=" in x for x in links) and any("/js/deck.js?v=" in x for x in links) and any("/css/app.css?v=" in x for x in links)
+    assert admin.get(next(x for x in links if "/js/app.js" in x)).status_code == 200

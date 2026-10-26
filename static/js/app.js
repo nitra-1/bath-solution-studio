@@ -6,7 +6,7 @@ const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': 
 const uid = () => Math.random().toString(36).slice(2, 9);
 const today = () => new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
 const store = { get(k) { try { return JSON.parse(localStorage.getItem(k)); } catch (e) { return null; } }, set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} } };
-const S = { me: null, meta: null, catalog: null, E: null, project: null, range: store.get('bss.range'), cat: { q: '', brand: '', series: '', category: '' }, review: null, users: null, catalogs: null, poll: null, q: null, qs: { q: '' }, qIdx: null };
+const S = { me: null, meta: null, catalog: null, E: null, project: null, range: store.get('bss.range2'), cat: { q: '', brand: '', series: '', category: '' }, review: null, users: null, catalogs: null, poll: null, q: null, qs: { q: '' }, qIdx: null };
 
 /* ---------- helpers ---------- */
 let toastT;
@@ -74,10 +74,9 @@ async function loadCatalog() {
   const b = S.catalog.brands[0];
   if (S.range) {  // saved choices from an earlier version may use old category names
     S.range.categories = (S.range.categories || []).filter(c => S.meta.categories.includes(c));
-    if (!S.range.categories.length) S.range.categories = S.meta.categories.slice();
   }
   if (!S.range || !S.catalog.brands.find(x => x.name === S.range.brand)) {
-    S.range = b ? { brand: b.name, series: b.series.map(s => s.name), categories: S.meta.categories.slice(), finishes: S.meta.finishes.map(f => f.key), exclude: [], layout: 'detail', showPrices: false, title: `${b.name} collections`, recipient: '' } : null;
+    S.range = b ? { brand: b.name, series: [], categories: [], finishes: [], exclude: [], layout: 'detail', showPrices: false, title: `${b.name} collections`, recipient: '' } : null;
   }
 }
 async function boot() {
@@ -320,6 +319,12 @@ async function pptSolution(btn) {
 }
 
 /* ---------- range deck ---------- */
+const selTools = (list, group) => `<span class="seltools"><button type="button" class="btn ghost" data-act="rsel" data-list="${list}" data-g="${esc(group || '')}" data-v="all">Select all</button><button type="button" class="btn ghost" data-act="rsel" data-list="${list}" data-g="${esc(group || '')}" data-v="none">Clear</button></span>`;
+function rangeSection(list, group) {
+  if (list === 'series') return S.E.brandOf(S.range.brand).series.map(s => s.name);
+  if (list === 'finishes') return S.meta.finishes.map(f => f.key);
+  return S.meta.groups.find(g => g.name === group).categories;
+}
 function viewRange() {
   if (!S.range) { $('#main').innerHTML = `<h1>Brand range deck</h1>${noCatalog()}`; return; }
   const R = S.range, E = S.E, b = E.brandOf(R.brand);
@@ -328,16 +333,16 @@ function viewRange() {
   const slides = 2 + groups.reduce((a, g) => {
     const grps = new Set(g.products.map(p => E.groupOf(p.category)));
     const perCat = Object.values(g.products.reduce((m, p) => (m[p.category] = (m[p.category] || 0) + 1, m), {}));
-    return a + 1 + (grps.size > 1 ? grps.size : 0) + (R.layout === 'grid' ? perCat.reduce((x, n) => x + Math.ceil(n / 6), 0) : g.products.length);
+    return a + 1 + (grps.size > 1 ? grps.size : 0) + (R.layout !== 'detail' ? perCat.reduce((x, n) => x + Math.ceil(n / ({ grid: 6, grid4: 4, grid2: 2 }[R.layout] || 6)), 0) : g.products.length);
   }, 0);
   $('#main').innerHTML = `<h1>Brand range deck</h1><p class="lede">Send an architect or designer a brand's range, or keep a brand-wise reference for the sales team. Every product gets its finishes and article numbers.</p>
   <div class="range">
     <section class="card panel">
       <label class="field"><span>Brand</span><select id="r-brand" data-r="brand">${opts(S.catalog.brands.map(x => [x.name, x.name]), R.brand)}</select><span class="muted small" style="text-transform:none;letter-spacing:0;font-weight:400">${esc(b.catalog)} · ${esc(b.price_basis)} · ${esc(b.currency)}</span></label>
-      <div class="field"><span>Collections</span><div class="checks">${b.series.map(s => `<label><input type="checkbox" id="rs-${esc(s.name)}" data-rlist="series" value="${esc(s.name)}" ${R.series.includes(s.name) ? 'checked' : ''}> ${esc(s.name)} <span class="muted small">${esc(s.style)}</span></label>`).join('')}</div></div>
-      ${S.meta.groups.filter(g => g.name !== 'Other').map(g => `<div class="field"><span>${esc(g.name)}</span><div class="checks">${g.categories.map(c => `<label><input type="checkbox" data-rlist="categories" value="${esc(c)}" ${R.categories.includes(c) ? 'checked' : ''}> ${esc(c)}</label>`).join('')}</div></div>`).join('')}
-      <div class="field"><span>Finishes to list</span><div class="checks">${S.meta.finishes.map(f => `<label><input type="checkbox" data-rlist="finishes" value="${f.key}" ${R.finishes.includes(f.key) ? 'checked' : ''}> <span class="dot" style="background:#${f.color}"></span> ${esc(f.label)}</label>`).join('')}</div></div>
-      <div class="field"><span>Layout</span>${seg('rlayout', [['detail', 'One product per slide'], ['grid', 'Overview, 6 per slide']], R.layout)}</div>
+      <div class="field"><span class="sechead">Collections ${selTools('series')}</span><div class="checks">${b.series.map(s => `<label><input type="checkbox" id="rs-${esc(s.name)}" data-rlist="series" value="${esc(s.name)}" ${R.series.includes(s.name) ? 'checked' : ''}> ${esc(s.name)} <span class="muted small">${esc(s.style)}</span></label>`).join('')}</div></div>
+      ${S.meta.groups.filter(g => g.name !== 'Other').map(g => `<div class="field"><span class="sechead">${esc(g.name)} ${selTools('categories', g.name)}</span><div class="checks">${g.categories.map(c => `<label><input type="checkbox" data-rlist="categories" value="${esc(c)}" ${R.categories.includes(c) ? 'checked' : ''}> ${esc(c)}</label>`).join('')}</div></div>`).join('')}
+      <div class="field"><span class="sechead">Finishes to list ${selTools('finishes')}</span><span class="muted small" style="text-transform:none;letter-spacing:0;font-weight:400">Nothing ticked = every finish is listed.</span><div class="checks">${S.meta.finishes.map(f => `<label><input type="checkbox" data-rlist="finishes" value="${f.key}" ${R.finishes.includes(f.key) ? 'checked' : ''}> <span class="dot" style="background:#${f.color}"></span> ${esc(f.label)}</label>`).join('')}</div></div>
+      <div class="field"><span>Layout</span>${seg('rlayout', [['detail', '1 per slide (full detail)'], ['grid2', '2 per slide'], ['grid4', '4 per slide'], ['grid', '6 per slide (overview)']], R.layout)}</div>
       <label><input type="checkbox" id="r-prices" data-rbool="showPrices" ${R.showPrices ? 'checked' : ''}> Show prices (internal use)</label>
       <label class="field"><span>Deck title</span><input type="text" id="r-title" data-rt="title" value="${esc(R.title)}"></label>
       <label class="field"><span>Prepared for</span><input type="text" id="r-rec" data-rt="recipient" value="${esc(R.recipient)}" placeholder="Architect or firm"></label>
@@ -482,9 +487,12 @@ function renderQuote() {
   $('#totalbar').hidden = false;
   $('#totalbar').innerHTML = `<div class="wrap"><div><div class="muted small">${Q.lines.filter(l => l.code || l.title).length} items</div><div class="t" id="q-total2">${inr(qTotal())}</div></div>
     <div class="msg" id="q-msg"></div>
-    <div class="row qbtns"><button class="btn primary" type="button" data-act="qsave">Save</button>
-      <button class="btn" type="button" data-act="qxlsx">Excel</button><button class="btn" type="button" data-act="qpdf">PDF</button><button class="btn" type="button" data-act="qprint">Print</button>
-      <button class="btn" type="button" data-act="qemail">Email</button><button class="btn" type="button" data-act="qwa">WhatsApp</button>
+    <div class="row qbtns"><button class="btn primary" type="button" data-act="qsave" title="Save this quotation. Each save is kept as a new revision.">Save</button>
+      <button class="btn" type="button" data-act="qcancel" title="Close without saving. Anything you have not saved will be lost.">Cancel</button>
+      <button class="btn qneed" type="button" data-act="qxlsx" data-tip="Download this quotation as an Excel file">Excel</button><button class="btn qneed" type="button" data-act="qpdf" data-tip="Download this quotation as a PDF">PDF</button>
+      <button class="btn qneed" type="button" data-act="qprint" data-tip="Print this quotation">Print</button>
+      <button class="btn qneed" type="button" data-act="qemail" data-tip="Download the PDF and open an email with the details filled in">Email</button>
+      <button class="btn qneed" type="button" data-act="qwa" data-tip="Download the PDF and open WhatsApp with the details filled in">WhatsApp</button>
       ${Q.id ? '<button class="btn ghost" type="button" data-act="qcopy">Copy to new quotation</button>' : ''}</div></div>`;
   qState();
   window.scrollTo(0, y);
@@ -493,6 +501,11 @@ function qState() {
   const Q = S.q; if (!Q) return;
   const t = Q.msg || (Q.dirty ? 'Unsaved changes' : Q.id ? `Saved · revision ${Q.rev}${Q.saved_at ? ' · ' + Q.saved_at : ''}` : '');
   const a = $('#savestate'), b = $('#q-msg'); if (a) a.textContent = t; if (b) b.textContent = Q.dirty ? 'Unsaved changes' : '';
+  const ready = !!Q.id && !Q.dirty;  // export, print and share work on the saved copy
+  document.querySelectorAll('.qneed').forEach(btn => {
+    btn.setAttribute('aria-disabled', ready ? 'false' : 'true');
+    btn.title = ready ? btn.dataset.tip : (Q.id ? 'You have unsaved changes. Save first, then you can use this.' : 'Save the quotation first, then you can use this.');
+  });
 }
 function qTotals() { const t = inr(qTotal()); const a = $('#q-total'), b = $('#q-total2'); if (a) a.textContent = t; if (b) b.textContent = t; }
 const qLine = k => S.q.lines.find(l => l.k === +k);
@@ -583,7 +596,6 @@ async function saveQuote() {
   if (fresh) { S.skipRoute = true; location.hash = `#/quote/${d.id}`; }
   renderQuote(); toast(`Saved ${d.number} · revision ${d.rev}`); return true;
 }
-async function ensureSaved() { if (S.q.dirty || !S.q.id) return saveQuote(); return true; }
 async function fileOf(kind) {
   const Q = S.q, r = await fetch(`/api/quotations/${Q.id}/${kind}?rev=${Q.rev}`, { credentials: 'same-origin' });
   if (!r.ok) { let m = `Could not make the ${kind} (${r.status})`; try { m = (await r.json()).error || m; } catch (e) {} throw new Error(m); }
@@ -610,11 +622,14 @@ async function quoteAct(a, t) {
   if (a === 'qadd') { Q.lines.push(blankLine()); renderQuote(); const l = Q.lines[Q.lines.length - 1]; const el = document.querySelector(`[data-k="${l.k}"][data-qf="code"]`); if (el) el.focus(); }
   else if (a === 'qdel') { Q.lines = Q.lines.filter(l => l.k !== +t.dataset.k); if (!Q.lines.length) Q.lines.push(blankLine()); Q.dirty = true; renderQuote(); }
   else if (a === 'qsave') await saveQuote();
+  else if (a === 'qcancel') {
+    if (Q.dirty && !confirm(Q.id ? 'Cancel without saving?\n\nThe changes you made since the last save will be lost.' : 'Cancel without saving?\n\nEverything you entered in this quotation will be lost.')) return;
+    Q.dirty = false; location.hash = '#/quotes';
+  }
   else if (a === 'qcopy') { const c = Q; newQuote(null); S.q.lines = c.lines.map(l => ({ ...l, k: ++qKey })); S.q.notes = c.notes; S.q.dirty = true; S.skipRoute = true; location.hash = '#/quote/new'; renderQuote(); toast('Copied. Choose the customer and save to create a new quotation.'); }
-  else if (a === 'qxlsx' || a === 'qpdf') { if (await ensureSaved()) await fileOf(a === 'qxlsx' ? 'xlsx' : 'pdf'); }
-  else if (a === 'qprint') { if (await ensureSaved()) printQuote(); }
+  else if (a === 'qxlsx' || a === 'qpdf') await fileOf(a === 'qxlsx' ? 'xlsx' : 'pdf');
+  else if (a === 'qprint') printQuote();
   else if (a === 'qemail') {
-    if (!(await ensureSaved())) return;
     await fileOf('pdf');
     const subj = `Quotation ${S.q.number}${S.me.settings.dealer ? ' from ' + S.me.settings.dealer : ''}`;
     location.href = `mailto:${encodeURIComponent(S.q.email.trim())}?subject=${encodeURIComponent(subj)}&body=${encodeURIComponent(qSummary(25) + '\n\n(The PDF was downloaded to your computer. Please attach it before sending.)')}`;
@@ -623,7 +638,7 @@ async function quoteAct(a, t) {
   else if (a === 'qwa') {
     const to = waNumber(Q.phone); if (!to) { toast('Add the customer phone number first.'); return; }
     const w = window.open('', '_blank');
-    try { if (!(await ensureSaved())) { if (w) w.close(); return; } await fileOf('pdf'); }
+    try { await fileOf('pdf'); }
     catch (e) { if (w) w.close(); throw e; }
     const url = `https://wa.me/${to}?text=${encodeURIComponent(qSummary(15))}`;
     if (w) w.location.href = url; else location.href = url;
@@ -830,13 +845,14 @@ function viewSettings() {
 const roomOf = el => S.project.rooms.find(r => r.id === el.dataset.room);
 const setPath = (o, path, v) => { const k = path.split('.'); let t = o; k.slice(0, -1).forEach(x => t = t[x]); t[k[k.length - 1]] = v; };
 function changed(r) { if (r && !r.edited) rebuild(r); else if (r) r.items = S.E.sortItems(r.items); saveSoon(); renderProject(); }
-function saveRange() { store.set('bss.range', S.range); viewRange(); }
+function saveRange() { store.set('bss.range2', S.range); viewRange(); }
 
 document.addEventListener('click', async e => {
   const nb = e.target.closest('[data-href]');
   if (nb) { location.hash = nb.dataset.href; return; }
   const t = e.target.closest('[data-act]'); if (!t || t.tagName === 'SELECT') return;
   const a = t.dataset.act, r = t.dataset.room && S.project ? roomOf(t) : null;
+  if (t.getAttribute('aria-disabled') === 'true') { toast(t.title); return; }
   try {
     if (a === 'logout') { await api('POST', '/api/logout'); S.me = null; showLogin(); }
     else if (a === 'newproject') await createProject();
@@ -854,6 +870,7 @@ document.addEventListener('click', async e => {
     else if (a === 'pptsol') await pptSolution(t);
     else if (a === 'rlayout') { S.range.layout = t.dataset.v; saveRange(); }
     else if (a === 'rall') { S.range.exclude = []; saveRange(); }
+    else if (a === 'rsel') { const L = t.dataset.list, set = rangeSection(L, t.dataset.g), cur = S.range[L].filter(x => !set.includes(x)); S.range[L] = t.dataset.v === 'all' ? [...cur, ...set] : cur; saveRange(); }
     else if (a === 'pptrange') await pptRange(t);
     else if (a === 'publish') { const rep = $('#rv-replace') ? $('#rv-replace').checked : true; await api('POST', `/api/catalogs/${t.dataset.id}/publish`, { replace_previous: rep }); await loadCatalog(); toast('Published. The sales team can use it now.'); route(); }
     else if (a === 'unpublish') { await api('POST', `/api/catalogs/${t.dataset.id}/unpublish`); await loadCatalog(); toast('Unpublished'); route(); }
@@ -866,7 +883,7 @@ document.addEventListener('click', async e => {
     else if (a === 'acceptflag') { await api('POST', `/api/variants/${t.dataset.vid}/accept`); const p = S.review.products.find(x => x.variants.some(v => v.id === +t.dataset.vid)); const v = p.variants.find(v => v.id === +t.dataset.vid); v.flags = []; t.closest('td').innerHTML = ''; toast('Warning cleared'); }
     else if (a === 'pickimg') { const inp = $('#imgpick'); inp.dataset.pid = t.dataset.pid; inp.value = ''; inp.click(); }
     else if (a === 'resetpw') { const pw = Math.random().toString(36).slice(2, 6) + '-' + Math.random().toString(36).slice(2, 6); if (confirmBtn(t, 'Confirm reset')) { await api('PATCH', `/api/users/${t.dataset.id}`, { password: pw }); t.closest('.li').querySelector('.muted').insertAdjacentHTML('beforeend', ` · New password: <b class="mono">${pw}</b>`); } }
-    else if (/^q(add|del|save|copy|xlsx|pdf|print|email|wa)$/.test(a)) await quoteAct(a, t);
+    else if (/^q(add|del|save|cancel|copy|xlsx|pdf|print|email|wa)$/.test(a)) await quoteAct(a, t);
     else if (a === 'toggleuser') { await api('PATCH', `/api/users/${t.dataset.id}`, { active: t.dataset.active !== '1' }); viewUsers(); }
   } catch (err) { toast(err.message); }
 });
@@ -892,7 +909,7 @@ document.addEventListener('change', async e => {
     else if (d.act === 'ifinish') { const r = roomOf(t); const i = r.items.findIndex(x => x.uid === d.uid); r.items[i] = S.E.refinish(r.items[i], t.value); r.edited = true; changed(r); }
     else if (d.act === 'swap' && t.value) { const r = roomOf(t); const i = r.items.findIndex(x => x.uid === d.uid); r.items[i] = S.E.swap(r.items[i], t.value); r.edited = true; changed(r); }
     else if (d.act === 'add' && t.value) { const r = roomOf(t); const it = S.E.item(S.E.byId[t.value], r.finish, 1, 'Added by hand'); if (it) r.items.push(it); r.edited = true; changed(r); }
-    else if (d.r === 'brand') { const b = S.E.brandOf(t.value); Object.assign(S.range, { brand: b.name, series: b.series.map(s => s.name), exclude: [], title: `${b.name} collections` }); saveRange(); }
+    else if (d.r === 'brand') { const b = S.E.brandOf(t.value); Object.assign(S.range, { brand: b.name, series: [], exclude: [], title: `${b.name} collections` }); saveRange(); }
     else if (d.rlist) { const L = S.range[d.rlist]; S.range[d.rlist] = t.checked ? [...new Set([...L, t.value])] : L.filter(x => x !== t.value); saveRange(); }
     else if (d.rbool) { S.range[d.rbool] = t.checked; saveRange(); }
     else if (d.rx) { S.range.exclude = t.checked ? S.range.exclude.filter(x => x !== d.rx) : [...S.range.exclude, d.rx]; saveRange(); }
@@ -909,7 +926,7 @@ document.addEventListener('input', e => {
   if (d.qs) { S.qs.q = t.value; clearTimeout(S.qst); S.qst = setTimeout(async () => { try { quoteList(await api('GET', '/api/quotations?q=' + encodeURIComponent(S.qs.q))); } catch (err) { toast(err.message); } }, 250); return; }
   if (d.p && S.project) { S.project[d.p] = t.value; saveSoon(); }
   else if (d.f === 'name' && S.project) { roomOf(t).name = t.value; saveSoon(); }
-  else if (d.rt) { S.range[d.rt] = t.value; store.set('bss.range', S.range); }
+  else if (d.rt) { S.range[d.rt] = t.value; store.set('bss.range2', S.range); }
   else if (d.c === 'q') { S.cat.q = t.value; const rows = catRows(); $('#c-tbl').innerHTML = catTable(rows); $('#c-count').textContent = rows.length + ' products'; }
   else if (t.id === 'rv-q') { S.review.q = t.value; clearTimeout(S.rq); S.rq = setTimeout(() => { renderReview(); const q = $('#rv-q'); q.focus(); q.setSelectionRange(q.value.length, q.value.length); }, 400); }
 });
