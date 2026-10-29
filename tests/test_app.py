@@ -70,7 +70,7 @@ def test_excel_flow_and_roles(admin):
         assert sales.post("/api/login", json={"email": "sam@shop.in", "password": "salespass1"}).status_code == 200
         assert all(p["brand"] != "Aura Test" for p in sales.get("/api/catalog").json()["products"])
         assert sales.get("/api/catalogs").status_code == 403
-        assert admin.post(f"/api/catalogs/{cid}/publish", json={"replace_previous": True}).status_code == 200
+        assert admin.post(f"/api/catalogs/{cid}/publish").status_code == 200
         cat = sales.get("/api/catalog").json()
         assert any(p["brand"] == "Aura Test" for p in cat["products"])
         assert cat["brands"][0]["currency"] == "INR"
@@ -192,3 +192,34 @@ def test_index_links_carry_a_version(admin):
     links = re.findall(r'/static/[^"]+\.(?:js|css)\?v=\d+', html)
     assert any("/js/app.js?v=" in x for x in links) and any("/js/deck.js?v=" in x for x in links) and any("/css/app.css?v=" in x for x in links)
     assert admin.get(next(x for x in links if "/js/app.js" in x)).status_code == 200
+
+
+def test_publish_never_archives_others_archive_is_explicit(admin):
+    """Several catalogs of one brand can be published together; only the Archive button hides one."""
+    def upload(name, art):
+        wb = load_workbook(io.BytesIO(admin.get("/api/template.xlsx").content))
+        wb["Products"].append(["MAIN", "shower_exposed", name, "", art, "Chrome", "", 100, ""])
+        buf = io.BytesIO()
+        wb.save(buf)
+        r = admin.post("/api/catalogs", data={"brand": "Multi Brand", "name": name, "currency": "INR"},
+                       files={"file": ("m.xlsx", buf.getvalue(), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")})
+        cid = r.json()["id"]
+        assert wait_ready(admin, cid) == "review"
+        return cid
+
+    def status(cid):
+        return next(c["status"] for c in admin.get("/api/catalogs").json() if c["id"] == cid)
+
+    a, b, c = upload("First list", "MB-1"), upload("Second list", "MB-2"), upload("Third list", "MB-3")
+    for cid in (a, b, c):
+        assert admin.post(f"/api/catalogs/{cid}/publish").status_code == 200
+    assert [status(x) for x in (a, b, c)] == ["published"] * 3          # publishing one did not archive the others
+    names = {p["name"] for p in admin.get("/api/catalog").json()["products"]}
+    assert {"First list", "Second list", "Third list"} <= names
+    assert admin.post(f"/api/catalogs/{b}/archive").status_code == 200   # archiving is explicit and hides only that one
+    assert [status(x) for x in (a, b, c)] == ["published", "archived", "published"]
+    names = {p["name"] for p in admin.get("/api/catalog").json()["products"]}
+    assert "Second list" not in names and "First list" in names
+    assert admin.post(f"/api/catalogs/{b}/publish").status_code == 200   # and it can come back
+    assert status(b) == "published"
+    assert admin.post(f"/api/catalogs/{b}/archive").status_code == 200 and admin.post(f"/api/catalogs/{b}/archive").status_code == 400

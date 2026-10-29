@@ -332,19 +332,27 @@ def patch_series(sid: int, body: SeriesPatch, _=Depends(auth.require_admin)):
     return {"ok": True}
 
 
-class PublishIn(BaseModel):
-    replace_previous: bool = True
-
-
 @app.post("/api/catalogs/{cid}/publish")
-def publish(cid: int, body: PublishIn, _=Depends(auth.require_admin)):
+def publish(cid: int, _=Depends(auth.require_admin)):
+    """Make a catalog visible to sales. Other catalogs of the same brand stay as they are: archiving is always explicit."""
     with db.connect() as c:
         cat = db.row(c, "SELECT * FROM catalogs WHERE id=?", cid)
         if not cat or cat["status"] not in ("review", "archived"):
             raise HTTPException(400, "Only catalogs that finished processing can be published.")
-        if body.replace_previous:
-            c.execute("UPDATE catalogs SET status='archived' WHERE brand_id=? AND status='published' AND id!=?", (cat["brand_id"], cid))
         c.execute("UPDATE catalogs SET status='published', published_at=CURRENT_TIMESTAMP WHERE id=?", (cid,))
+    return {"ok": True}
+
+
+@app.post("/api/catalogs/{cid}/archive")
+def archive(cid: int, _=Depends(auth.require_admin)):
+    """Hide a catalog from sales and keep it in the list (it can be published again). Nothing is deleted."""
+    with db.connect() as c:
+        cat = db.row(c, "SELECT * FROM catalogs WHERE id=?", cid)
+        if not cat:
+            raise HTTPException(404, "Catalog not found.")
+        if cat["status"] not in ("review", "published"):
+            raise HTTPException(400, "Only a catalog that finished processing can be archived.")
+        c.execute("UPDATE catalogs SET status='archived' WHERE id=?", (cid,))
     return {"ok": True}
 
 

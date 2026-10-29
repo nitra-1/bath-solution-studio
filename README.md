@@ -75,7 +75,7 @@ Working from outside the office is not set up. If you need it later, a tunnel se
    - products without a photo (click the photo box to add one),
    - products whose **type** wasn't recognised. Set the type so the solution builder can use them.
    Fix and **Save product**, or click **It's correct, clear warning**.
-4. **Publish to sales**. By default this replaces the brand's previous price list (the old one is archived, not deleted).
+4. **Publish to sales**. Publishing never hides anything else: a brand can have several catalogs published together (for example a main catalogue plus a new-products flyer). To take a catalog off the sales screens, press **Archive** next to it. Archived catalogs stay in the list and can be published again; only **Delete** removes one.
 
 Projects built on an older price list keep working. Rooms that weren't edited by hand pick up the new products and prices the next time they're opened.
 

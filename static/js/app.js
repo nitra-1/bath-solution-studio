@@ -683,7 +683,7 @@ async function viewCatalogs() {
   <section class="card list" style="margin-top:16px">${cs.length ? cs.map(c => `<div class="li"><div>
       <a href="#/admin/catalogs/${c.id}">${esc(c.brand)} · ${esc(c.name)}</a> <span class="status ${c.status}">${{ processing: 'Reading…', review: 'Needs review', published: 'Published', archived: 'Archived', failed: 'Failed' }[c.status]}</span>
       <div class="muted small">${c.products} products · ${c.skus} article numbers${c.flagged + c.product_issues ? ` · <span style="color:var(--warn)">${c.flagged + c.product_issues} to check</span>` : ''} · ${esc(c.filename || '')} · uploaded ${esc((c.uploaded_at || '').slice(0, 16))}${c.uploaded_by ? ' by ' + esc(c.uploaded_by) : ''}</div></div>
-      <div class="row">${c.status === 'review' || c.status === 'archived' ? `<button class="btn" type="button" data-act="publish" data-id="${c.id}">Publish</button>` : ''}${c.status === 'published' ? `<button class="btn ghost" type="button" data-act="unpublish" data-id="${c.id}">Unpublish</button>` : ''}
+      <div class="row">${c.status === 'review' || c.status === 'archived' ? `<button class="btn" type="button" data-act="publish" data-id="${c.id}">Publish</button>` : ''}${c.status === 'published' ? `<button class="btn ghost" type="button" data-act="unpublish" data-id="${c.id}" title="Hide from sales and send it back to review">Unpublish</button>` : ''}${c.status === 'published' || c.status === 'review' ? `<button class="btn ghost" type="button" data-act="archive" data-id="${c.id}" title="Hide from sales and keep it in this list. You can publish it again later.">Archive</button>` : ''}
       <a class="btn" href="#/admin/catalogs/${c.id}">Review</a><button class="btn ghost" type="button" data-act="delcatalog" data-id="${c.id}">Delete</button></div></div>`).join('')
     : '<div class="empty">No catalogs yet. Upload the first price list above.</div>'}</section>`;
   $('#upform').onsubmit = async e => {
@@ -725,8 +725,9 @@ function renderReview() {
   <div class="row" style="justify-content:space-between;margin-top:4px"><div><h1>${esc(c.brand)} · ${esc(c.name)} <span class="status ${c.status}">${c.status}</span></h1>
     <p class="lede">${R.products.length} products from ${esc(c.filename || '')}. ${nWork ? `${nWork} need attention.` : 'Nothing flagged.'} Sales see this catalog only after you publish it.</p></div></div>
   <div class="sticky-actions">
-    ${c.status !== 'published' && c.status !== 'processing' && c.status !== 'failed' ? `<button class="btn primary" type="button" data-act="publish" data-id="${c.id}">Publish to sales</button><label class="small"><input type="checkbox" id="rv-replace" checked> Replace the brand's current catalog</label>` : ''}
-    ${c.status === 'published' ? `<button class="btn" type="button" data-act="unpublish" data-id="${c.id}">Unpublish</button>` : ''}
+    ${c.status !== 'published' && c.status !== 'processing' && c.status !== 'failed' ? `<button class="btn primary" type="button" data-act="publish" data-id="${c.id}">Publish to sales</button>` : ''}
+    ${c.status === 'published' ? `<button class="btn" type="button" data-act="unpublish" data-id="${c.id}" title="Hide from sales and send it back to review">Unpublish</button>` : ''}
+    ${c.status === 'published' || c.status === 'review' ? `<button class="btn ghost" type="button" data-act="archive" data-id="${c.id}" title="Hide from sales and keep it in the list. You can publish it again later.">Archive</button>` : ''}
     <label class="small"><input type="checkbox" id="rv-only" ${only ? 'checked' : ''}> Needs attention only</label>
     <input type="text" id="rv-q" placeholder="Find product or article no." value="${esc(R.q || '')}" style="max-width:240px">
     <button class="btn ghost" type="button" data-act="addproduct">+ Add product</button>
@@ -872,7 +873,8 @@ document.addEventListener('click', async e => {
     else if (a === 'rall') { S.range.exclude = []; saveRange(); }
     else if (a === 'rsel') { const L = t.dataset.list, set = rangeSection(L, t.dataset.g), cur = S.range[L].filter(x => !set.includes(x)); S.range[L] = t.dataset.v === 'all' ? [...cur, ...set] : cur; saveRange(); }
     else if (a === 'pptrange') await pptRange(t);
-    else if (a === 'publish') { const rep = $('#rv-replace') ? $('#rv-replace').checked : true; await api('POST', `/api/catalogs/${t.dataset.id}/publish`, { replace_previous: rep }); await loadCatalog(); toast('Published. The sales team can use it now.'); route(); }
+    else if (a === 'publish') { await api('POST', `/api/catalogs/${t.dataset.id}/publish`); await loadCatalog(); toast('Published. The sales team can use it now. Other catalogs of this brand are unchanged.'); route(); }
+    else if (a === 'archive') { if (confirmBtn(t, 'Confirm archive')) { await api('POST', `/api/catalogs/${t.dataset.id}/archive`); await loadCatalog(); toast('Archived. Sales no longer see it; you can publish it again any time.'); route(); } }
     else if (a === 'unpublish') { await api('POST', `/api/catalogs/${t.dataset.id}/unpublish`); await loadCatalog(); toast('Unpublished'); route(); }
     else if (a === 'delcatalog') { if (confirmBtn(t, 'Confirm delete')) { await api('DELETE', `/api/catalogs/${t.dataset.id}`); await loadCatalog(); viewCatalogs(); } }
     else if (a === 'savecat') { await api('PATCH', `/api/catalogs/${t.dataset.id}`, { name: $('#rc-name').value, currency: $('#rc-cur').value, price_basis: $('#rc-basis').value }); toast('Saved'); }
