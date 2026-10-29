@@ -339,7 +339,8 @@ function viewRange() {
   <div class="range">
     <section class="card panel">
       <label class="field"><span>Brand</span><select id="r-brand" data-r="brand">${opts(S.catalog.brands.map(x => [x.name, x.name]), R.brand)}</select><span class="muted small" style="text-transform:none;letter-spacing:0;font-weight:400">${esc(b.catalog)} · ${esc(b.price_basis)} · ${esc(b.currency)}</span></label>
-      <div class="field"><span class="sechead">Collections ${selTools('series')}</span><div class="checks">${b.series.map(s => `<label><input type="checkbox" id="rs-${esc(s.name)}" data-rlist="series" value="${esc(s.name)}" ${R.series.includes(s.name) ? 'checked' : ''}> ${esc(s.name)} <span class="muted small">${esc(s.style)}</span></label>`).join('')}</div></div>
+      <div class="field"><span class="sechead">Collections ${selTools('series')}</span><span class="muted small" style="text-transform:none;letter-spacing:0;font-weight:400">Tick the collections for this deck.</span><div class="checks">${b.series.map(s => `<label><input type="checkbox" id="rs-${esc(s.name)}" data-rlist="series" value="${esc(s.name)}" ${R.series.includes(s.name) ? 'checked' : ''}> ${esc(s.name)} <span class="muted small">${esc(s.style)}</span></label>`).join('')}</div></div>
+      <div class="muted small" style="margin-top:2px">Categories narrow the deck down. Nothing ticked = every product of the chosen collections.</div>
       ${S.meta.groups.filter(g => g.name !== 'Other').map(g => `<div class="field"><span class="sechead">${esc(g.name)} ${selTools('categories', g.name)}</span><div class="checks">${g.categories.map(c => `<label><input type="checkbox" data-rlist="categories" value="${esc(c)}" ${R.categories.includes(c) ? 'checked' : ''}> ${esc(c)}</label>`).join('')}</div></div>`).join('')}
       <div class="field"><span class="sechead">Finishes to list ${selTools('finishes')}</span><span class="muted small" style="text-transform:none;letter-spacing:0;font-weight:400">Nothing ticked = every finish is listed.</span><div class="checks">${S.meta.finishes.map(f => `<label><input type="checkbox" data-rlist="finishes" value="${f.key}" ${R.finishes.includes(f.key) ? 'checked' : ''}> <span class="dot" style="background:#${f.color}"></span> ${esc(f.label)}</label>`).join('')}</div></div>
       <div class="field"><span>Layout</span>${seg('rlayout', [['detail', '1 per slide (full detail)'], ['grid2', '2 per slide'], ['grid4', '4 per slide'], ['grid', '6 per slide (overview)']], R.layout)}</div>
@@ -354,7 +355,7 @@ function viewRange() {
         const on = !R.exclude.includes(p.id);
         const head = !i || g.products[i - 1].category !== p.category ? `<div class="cathead small"><b>${esc(p.category)}</b><span class="muted">${esc(E.groupOf(p.category))}</span></div>` : '';
         return head + `<label class="tile ${on ? '' : 'off'}"><input type="checkbox" data-rx="${p.id}" ${on ? 'checked' : ''}><div class="im">${p.image ? `<img alt="" loading="lazy" src="${esc(p.image)}">` : ''}</div><div class="tx"><span class="c">${esc(p.category)}</span><span class="n">${esc(p.name)}</span><span>${p.variants.map(v => `<span class="dot" style="background:${swc(v.finish_key)}"></span>`).join(' ')}</span></div></label>`;
-      }).join('')}</div>`).join('') : '<div class="empty">Pick at least one collection and category.</div>'}
+      }).join('')}</div>`).join('') : '<div class="empty">Tick at least one collection on the left. Then tick categories (basin mixers, shower heads…) to narrow it down, or leave them all unticked to include every product.</div>'}
     </section>
   </div>`;
   $('#totalbar').hidden = false;
