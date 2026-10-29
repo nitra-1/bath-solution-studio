@@ -138,7 +138,7 @@ def classify(title: str, specs: list, series: str = ""):
         if T.endswith(" 150") and series.upper() == "TOPIA":
             t, name = "basin_3hole", "Three-hole basin mixer 150"
         elif h is None:
-            t = "basin_std"
+            t = "basin_tall" if re.search(r"\b(high|tall)\b", T) else "basin_std"  # no outlet height printed: go by the name
         else:
             t = "basin_tall" if h > 200 else ("basin_mid" if h > 140 else "basin_std")
     elif "bidet" in T and ("spray" in T or "health" in T or "shattaf" in T):
