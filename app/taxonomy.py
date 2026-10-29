@@ -90,7 +90,7 @@ FINISHES = [
 
 def finish_key(text: str) -> str:
     t = (text or "").lower()
-    rules = [("rose", "rosegold"), ("gunmetal", "gunmetal"), ("graphite", "gunmetal"), ("anthracite", "gunmetal"),
+    rules = [("rose", "rosegold"), ("gunmetal", "gunmetal"), ("gun metal", "gunmetal"), ("graphite", "gunmetal"), ("anthracite", "gunmetal"),
              ("black", "black"), ("nickel", "nickel"), ("gold", "gold"), ("champagne", "gold"), ("brass", "brass"),
              ("bronze", "brass"), ("copper", "rosegold"), ("stainless", "steel"), ("steel", "steel"), ("inox", "steel"),
              ("white", "white"), ("chrom", "chrome")]
@@ -174,7 +174,7 @@ def classify(title: str, specs: list, series: str = ""):
         rot = has("Rotating diverter")
         t = "conc_2f_rot" if rot else "conc_2f_push"
         name = "Concealed mixer, 2 functions, " + ("rotating diverter" if rot else "push diverter")
-    elif "shower mixer" in T or ("shower" in T and "exposed" in T):
+    elif "shower mixer" in T or "mixer for shower" in T or ("shower" in T and "exposed" in T):
         fr = _num(specs, "Flow rate")
         t = "shower_exposed_bar" if (fr == 15 and series.upper() == "TEVEO") else "shower_exposed"
         name = "Shower mixer, exposed" + (" (bar design)" if t == "shower_exposed_bar" else "")
