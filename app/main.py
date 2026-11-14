@@ -1,6 +1,8 @@
 """Bath Solution Studio: web server and API."""
+import hmac
 import io
 import json
+import os
 import re
 import time
 import uuid
@@ -19,7 +21,17 @@ from .taxonomy import CATEGORIES, FINISHES, GROUPS, TYPE_CAT, TYPES, finish_key,
 
 ROOT = Path(__file__).resolve().parent.parent
 STATIC = ROOT / "static"
-VERSION = "1.0.0"
+VERSION = os.environ.get("BSS_VERSION", "dev")  # set to the git commit by the build; "dev" when run from source
+
+
+def _setup_token():
+    """BSS_SETUP_TOKEN, when set, must be typed to create the first admin (protects a fresh internet-facing server)."""
+    return os.environ.get("BSS_SETUP_TOKEN", "").strip()
+
+
+def _secure_cookies():
+    """BSS_SECURE_COOKIES=1 behind HTTPS: the login cookie is then never sent over plain HTTP."""
+    return os.environ.get("BSS_SECURE_COOKIES", "").strip().lower() in ("1", "true", "yes")
 
 @asynccontextmanager
 async def lifespan(_app):
@@ -45,6 +57,7 @@ class Creds(BaseModel):
     email: str
     password: str
     name: str = ""
+    setup_token: str = ""
 
 
 _fails: dict = {}
@@ -55,7 +68,18 @@ def status():
     with db.connect() as c:
         n = db.row(c, "SELECT count(*) n FROM users")["n"]
         dealer = db.get_setting(c, "dealer")
-    return {"needs_setup": n == 0, "dealer": dealer, "version": VERSION}
+    return {"needs_setup": n == 0, "setup_token_required": n == 0 and bool(_setup_token()), "dealer": dealer, "version": VERSION}
+
+
+@app.get("/healthz")
+def healthz():
+    """For the load-balancer / deploy health check: the app answers and the database opens. No login needed."""
+    try:
+        with db.connect() as c:
+            c.execute("SELECT 1 FROM users LIMIT 1").fetchall()
+    except Exception:  # noqa
+        return JSONResponse({"ok": False, "version": VERSION}, status_code=503)
+    return {"ok": True, "version": VERSION}
 
 
 @app.post("/api/setup")
@@ -63,6 +87,9 @@ def setup(body: Creds, response: Response):
     with db.connect() as c:
         if db.row(c, "SELECT count(*) n FROM users")["n"]:
             raise HTTPException(400, "Setup is already done. Sign in instead.")
+        token = _setup_token()
+        if token and not hmac.compare_digest(body.setup_token.strip(), token):
+            raise HTTPException(403, "The setup code is wrong. Ask whoever installed the server for it.")
         _check_pw(body.password)
         uid = c.execute("INSERT INTO users(email,name,password_hash,role) VALUES(?,?,?, 'admin')",
                         (body.email.strip().lower(), body.name.strip() or "Admin", auth.hash_pw(body.password))).lastrowid
@@ -76,7 +103,7 @@ def _check_pw(pw):
 
 
 def _set_cookie(response, token):
-    response.set_cookie(auth.COOKIE, token, httponly=True, samesite="lax", max_age=auth.SESSION_DAYS * 86400)
+    response.set_cookie(auth.COOKIE, token, httponly=True, samesite="lax", secure=_secure_cookies(), max_age=auth.SESSION_DAYS * 86400)
 
 
 @app.post("/api/login")
@@ -99,7 +126,7 @@ def login(body: Creds, response: Response):
 def logout(request: Request, response: Response):
     with db.connect() as c:
         c.execute("DELETE FROM sessions WHERE token=?", (request.cookies.get(auth.COOKIE, ""),))
-    response.delete_cookie(auth.COOKIE)
+    response.delete_cookie(auth.COOKIE, secure=_secure_cookies(), httponly=True, samesite="lax")
     return {"ok": True}
 
 

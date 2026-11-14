@@ -1,0 +1,31 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    { "Sid": "EcrLogin", "Effect": "Allow", "Action": "ecr:GetAuthorizationToken", "Resource": "*" },
+    {
+      "Sid": "EcrPushAndCheck",
+      "Effect": "Allow",
+      "Action": [
+        "ecr:BatchCheckLayerAvailability", "ecr:InitiateLayerUpload", "ecr:UploadLayerPart",
+        "ecr:CompleteLayerUpload", "ecr:PutImage", "ecr:BatchGetImage", "ecr:DescribeImages"
+      ],
+      "Resource": "arn:aws:ecr:REGION:ACCOUNT_ID:repository/bath-studio"
+    },
+    {
+      "Sid": "UploadReleaseFiles",
+      "Effect": "Allow",
+      "Action": ["s3:PutObject"],
+      "Resource": "arn:aws:s3:::BUCKET_NAME/releases/*"
+    },
+    {
+      "Sid": "RunDeployOnTheServer",
+      "Effect": "Allow",
+      "Action": "ssm:SendCommand",
+      "Resource": [
+        "arn:aws:ssm:REGION::document/AWS-RunShellScript",
+        "arn:aws:ec2:REGION:ACCOUNT_ID:instance/INSTANCE_ID"
+      ]
+    },
+    { "Sid": "ReadDeployResult", "Effect": "Allow", "Action": ["ssm:GetCommandInvocation", "ssm:ListCommandInvocations"], "Resource": "*" }
+  ]
+}

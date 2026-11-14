@@ -16,6 +16,7 @@ Local-network sales tool for a bath/sanitary showroom. The owner (Nitin) is not 
 - `static/js/engine.js` — room → product list rules (`buildRoom`), alternatives, range deck grouping. Shared shape with the original prototype.
 - `static/js/deck.js` — PptxGenJS slide builders (`buildSolution`, `buildRange`).
 - `static/js/app.js` — the whole UI: hash router, sales screens, admin screens.
+- `deploy/` + `.github/workflows/deploy.yml` — AWS production: EC2 + Docker Compose (app behind Caddy), data on EBS, nightly S3 backups, push to `main` = test → ECR image → deploy via SSM with health check and automatic rollback. See `deploy/README.md`. Production settings are env vars (`BSS_SETUP_TOKEN`, `BSS_SECURE_COOKIES`, `BSS_VERSION`); defaults keep the office/local install unchanged. Keep one uvicorn worker.
 
 ## Catalog lifecycle
 `processing` → `review` → `published` ⇄ `archived`. Archiving happens only when an admin clicks Archive; publishing never archives or hides other catalogs (a brand can have several published). Sales only see `published`. Product ids sent to the browser are `p<id>` strings.

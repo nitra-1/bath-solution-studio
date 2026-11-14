@@ -1,0 +1,44 @@
+# Production stack on the EC2 server: the app behind Caddy (HTTPS).
+# Lives at /srv/bath-studio/docker-compose.prod.yml; the pipeline replaces it on every deploy.
+# Values come from /srv/bath-studio/.env (see .env.example). BSS_IMAGE is written by deploy.sh.
+name: bath-studio
+
+services:
+  app:
+    image: ${BSS_IMAGE:?BSS_IMAGE is not set - run deploy.sh}
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      BSS_DATA_DIR: /app/data
+    volumes:
+      - /srv/bath-studio/data:/app/data   # database, product photos, uploaded price lists (on the EBS volume)
+    expose:
+      - "8000"                            # reachable only by Caddy, never published on the host
+    logging:
+      driver: json-file
+      options: { max-size: "20m", max-file: "5" }
+
+  caddy:
+    image: caddy:2.8
+    restart: unless-stopped
+    depends_on:
+      app:
+        condition: service_healthy
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      BSS_DOMAIN: ${BSS_DOMAIN:?BSS_DOMAIN is not set in .env}
+      ACME_EMAIL: ${ACME_EMAIL:?ACME_EMAIL is not set in .env}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data                  # TLS certificates; survives redeploys
+      - caddy_config:/config
+    logging:
+      driver: json-file
+      options: { max-size: "20m", max-file: "5" }
+
+volumes:
+  caddy_data:
+  caddy_config:

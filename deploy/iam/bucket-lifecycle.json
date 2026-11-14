@@ -1,0 +1,7 @@
+{
+  "Rules": [
+    { "ID": "release-files-30d", "Status": "Enabled", "Filter": { "Prefix": "releases/" }, "Expiration": { "Days": 30 } },
+    { "ID": "db-backups-90d", "Status": "Enabled", "Filter": { "Prefix": "backups/db/" }, "Expiration": { "Days": 90 } },
+    { "ID": "old-versions-30d", "Status": "Enabled", "Filter": { "Prefix": "" }, "NoncurrentVersionExpiration": { "NoncurrentDays": 30 } }
+  ]
+}

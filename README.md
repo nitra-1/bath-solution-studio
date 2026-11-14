@@ -118,6 +118,10 @@ Download the new version, replace everything **except the `data` folder**, and s
 
 ---
 
+## Running on AWS (multiple locations)
+
+For use from several offices, the app runs on one AWS server behind HTTPS, and every push to `main` on GitHub deploys automatically after the tests pass. The setup is in `deploy/` (start with `deploy/README.md`); the step-by-step guide for DevOps is the "Bath Solution Studio – AWS Deployment & CI/CD" document.
+
 ## For developers
 
 - Backend: Python, FastAPI, SQLite (`app/`). Frontend: plain HTML/CSS/JS without a build step (`static/`). PowerPoint files are generated in the browser with PptxGenJS (`static/vendor`).

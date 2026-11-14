@@ -1,0 +1,31 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    { "Sid": "EcrLogin", "Effect": "Allow", "Action": "ecr:GetAuthorizationToken", "Resource": "*" },
+    {
+      "Sid": "EcrPull",
+      "Effect": "Allow",
+      "Action": ["ecr:BatchGetImage", "ecr:GetDownloadUrlForLayer", "ecr:BatchCheckLayerAvailability"],
+      "Resource": "arn:aws:ecr:REGION:ACCOUNT_ID:repository/bath-studio"
+    },
+    {
+      "Sid": "ReadReleaseFiles",
+      "Effect": "Allow",
+      "Action": ["s3:GetObject"],
+      "Resource": "arn:aws:s3:::BUCKET_NAME/releases/*"
+    },
+    {
+      "Sid": "Backups",
+      "Effect": "Allow",
+      "Action": ["s3:GetObject", "s3:PutObject"],
+      "Resource": "arn:aws:s3:::BUCKET_NAME/backups/*"
+    },
+    {
+      "Sid": "ListBucketForSyncAndCopy",
+      "Effect": "Allow",
+      "Action": "s3:ListBucket",
+      "Resource": "arn:aws:s3:::BUCKET_NAME",
+      "Condition": { "StringLike": { "s3:prefix": ["releases/*", "backups/*"] } }
+    }
+  ]
+}

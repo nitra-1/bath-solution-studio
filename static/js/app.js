@@ -54,15 +54,16 @@ function showLogin(msg) {
     catch (err) { $('#l-err').textContent = err.message; }
   };
 }
-function showSetup() {
+function showSetup(tokenRequired) {
   bare(`<form class="card login" id="setupform"><h1>Set up Bath Solution Studio</h1><p class="muted" style="margin:0">Create the first admin account. You'll add the sales team after this.</p>
+    ${tokenRequired ? `<label class="field"><span>Setup code (from whoever installed the server)</span><input type="password" id="s-token" required autocomplete="off" style="border:1px solid var(--line);border-radius:8px;padding:7px 9px"></label>` : ''}
     <label class="field"><span>Your name</span><input type="text" id="s-name" required></label>
     <label class="field"><span>Email</span><input type="text" id="s-email" required></label>
     <label class="field"><span>Password (8+ characters)</span><input type="password" id="s-pw" required style="border:1px solid var(--line);border-radius:8px;padding:7px 9px"></label>
     <div class="err" id="s-err"></div><button class="btn primary" type="submit">Create admin account</button></form>`);
   $('#setupform').onsubmit = async e => {
     e.preventDefault();
-    try { await api('POST', '/api/setup', { name: $('#s-name').value, email: $('#s-email').value, password: $('#s-pw').value }); await boot(); }
+    try { await api('POST', '/api/setup', { name: $('#s-name').value, email: $('#s-email').value, password: $('#s-pw').value, setup_token: tokenRequired ? $('#s-token').value : '' }); await boot(); }
     catch (err) { $('#s-err').textContent = err.message; }
   };
 }
@@ -81,7 +82,7 @@ async function loadCatalog() {
 }
 async function boot() {
   const st = await api('GET', '/api/status');
-  if (st.needs_setup) return showSetup();
+  if (st.needs_setup) return showSetup(st.setup_token_required);
   try { S.me = await api('GET', '/api/me'); } catch (e) { return; }
   S.meta = await api('GET', '/api/meta');
   await loadCatalog();

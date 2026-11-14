@@ -1,0 +1,36 @@
+# HTTPS front door. Caddy gets and renews the Let's Encrypt certificate for BSS_DOMAIN by itself
+# (needs ports 80 and 443 open and the domain's A record pointing at the server's Elastic IP).
+{
+	email {$ACME_EMAIL}
+}
+
+{$BSS_DOMAIN} {
+	encode zstd gzip
+
+	# Price-list uploads can be large (the app itself refuses files over 200 MB).
+	request_body {
+		max_size 210MB
+	}
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		Permissions-Policy "camera=(), microphone=(), geolocation=()"
+		-Server
+	}
+
+	reverse_proxy app:8000 {
+		# PDF reading and deck downloads can take a while.
+		transport http {
+			read_timeout 300s
+			write_timeout 300s
+		}
+	}
+
+	log {
+		output stdout
+		format json
+	}
+}
