@@ -16,7 +16,7 @@ def format_art(code):
 
 
 PROFILE = Profile(
-    name="keuco", label="KEUCO price list", brands=["KEUCO"],
+    name="keuco", label="KEUCO price list 2025 (project series)", brands=[],  # KEUCO uploads now default to keuco_2026
     code_tokens=[r"^\d{11}$", r"^\d{5}$\s^\d{6}$"], code_min_digits=11, join_code_words=False,
     series_header=r"^([A-Z][A-Z0-9]+)\s+(Fittings|Accessories)", format_art=format_art,
     finish_codes={"01": "chrome-plated", "37": "matt black", "71": "brushed nickel PVD",

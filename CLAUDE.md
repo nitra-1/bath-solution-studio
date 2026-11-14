@@ -18,7 +18,7 @@ Local-network sales tool for a bath/sanitary showroom. The owner (Nitin) is not 
 - `static/js/app.js` — the whole UI: hash router, sales screens, admin screens.
 
 ## Catalog lifecycle
-`processing` → `review` → `published` (→ `archived` when replaced). Sales only see `published`. Product ids sent to the browser are `p<id>` strings.
+`processing` → `review` → `published` ⇄ `archived`. Archiving happens only when an admin clicks Archive; publishing never archives or hides other catalogs (a brand can have several published). Sales only see `published`. Product ids sent to the browser are `p<id>` strings.
 
 ## Conventions
 - UI copy: plain, active voice, from the user's side ("Publish to sales", "Needs attention only").

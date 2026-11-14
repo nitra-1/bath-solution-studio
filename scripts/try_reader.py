@@ -54,15 +54,16 @@ def main():
             p["type"], p["name"] = classify(p["title"], p["specs"], p.get("series", ""))
         p["category"] = p.get("category") or TYPE_CAT.get(p["type"], "Other")
         for v in p["variants"]:
-            v["finish_key"] = finish_key(v["finish"])
-        p["attributes"] = _attributes(p["specs"])
+            v["finish_key"] = v.get("finish_key") or finish_key(v["finish"])  # same rule as the app
+        p["attributes"] = {**_attributes(p["specs"]), **p.get("attributes", {})}
     validate(products, prof)
     n_v = sum(len(p["variants"]) for p in products)
     print(f"Reader: {reader}   Products: {len(products)}   Article numbers: {n_v}   Photos cropped to: {img_dir}")
     print("Pages with products:", len({p['page'] for p in products}), " Collections:", dict(Counter(p['series'] for p in products)))
     checks = {
         "untitled products": sum(1 for p in products if p["title"] == "Untitled product"),
-        "type not recognised": sum(1 for p in products if p["type"] == "other"),
+        "type not recognised": sum(1 for p in products if p["type"] == "other" and not p["attributes"].get("no_fitting_type")),
+        "not a fitting (by reader)": sum(1 for p in products if p["attributes"].get("no_fitting_type")),
         "no photo": sum(1 for p in products if not p.get("image")),
         "no article numbers": sum(1 for p in products if not p["variants"]),
         "rows without finish text": sum(1 for p in products for v in p["variants"] if not v["finish"]),
@@ -77,7 +78,7 @@ def main():
     if no_text:
         print(f"  {len(no_text)} pages have no text (photo pages, or scans this reader can't read).")
     if checks["type not recognised"]:
-        print("  Unrecognised titles:", [p["title"] for p in products if p["type"] == "other"][:15])
+        print("  Unrecognised titles:", [p["title"] for p in products if p["type"] == "other" and not p["attributes"].get("no_fitting_type")][:15])
     for p in products[: a.show]:
         print(f"\n- p{p['page']} [{p['series']}] {p['title']!r} -> {p['type']}")
         for g in p["specs"]:

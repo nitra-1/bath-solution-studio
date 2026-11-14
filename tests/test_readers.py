@@ -15,7 +15,7 @@ CASES = [e for e in sorted(SAMPLES.glob("*.expected.json")) if e.with_name(e.nam
 def test_registry_has_readers():
     keys = [r["key"] for r in profiles.all_readers()]
     assert "generic" in keys and "keuco" in keys and "template" not in keys
-    assert profiles.for_brand("KEUCO") == "keuco" and profiles.for_brand("Unknown Brand") == "generic"
+    assert profiles.for_brand("KEUCO") == "keuco_2026" and profiles.for_brand("Unknown Brand") == "generic"
 
 
 def test_price_formats():
@@ -34,7 +34,8 @@ def test_sample_pdf(expected):
     products, _ = pdf_parser.parse(str(pdf), Path(tempfile.mkdtemp()), "t", exp["reader"], "", log=lambda m: None)
     assert len(products) == exp["products"]
     assert sum(len(p["variants"]) for p in products) == exp["article_numbers"]
-    unknown = sum(1 for p in products if (p.get("type") or classify(p["title"], p["specs"], p.get("series", ""))[0]) == "other")
+    unknown = sum(1 for p in products if (p.get("type") or classify(p["title"], p["specs"], p.get("series", ""))[0]) == "other"
+                  and not p.get("attributes", {}).get("no_fitting_type"))
     assert unknown <= exp.get("max_unrecognised", 0)
 
 

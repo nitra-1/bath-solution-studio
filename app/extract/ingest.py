@@ -141,7 +141,7 @@ def _looks_poor(products):
     if len(products) < 5:
         return True
     untitled = sum(1 for p in products if p["title"] == "Untitled product")
-    unknown = sum(1 for p in products if p.get("type") == "other")
+    unknown = sum(1 for p in products if p.get("type") == "other" and not p.get("attributes", {}).get("no_fitting_type"))
     no_finish = sum(1 for p in products for v in p["variants"] if not v["finish"])
     n_v = max(1, sum(len(p["variants"]) for p in products))
     return untitled / len(products) > 0.2 or unknown / len(products) > 0.4 or no_finish / n_v > 0.3

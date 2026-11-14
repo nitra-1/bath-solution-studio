@@ -1,0 +1,800 @@
+From c46c70c24a8a5257b4127de4ecb69b75d1eab8c4 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Sat, 17 Oct 2026 13:41:12 +0000
+Subject: [PATCH] Separate main products from accessories; port 8010 with
+ busy-port check
+
+- Categories regrouped into Main products (basin, bidet, shower and bath mixers,
+  shower heads, hand showers) and Accessories (shower arms, hoses/outlets/holders,
+  waste/traps/valves, towel holders, paper holders, shelves/mirrors)
+- Category always follows the product type; existing databases are migrated at start-up
+- Proposal deck: separate slides per room for main products and accessories, grouped price summary
+- Range deck: group divider slides, one category per overview slide
+- Replace-with only offers products of the same category
+- start.bat/start.sh default to port 8010 and move to the next free port if it's taken
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_012YX2E1bvKbWAmZotn6sMbd
+---
+ .gitattributes        |   3 ++
+ README.md             |   6 +--
+ app/extract/ingest.py |  30 +++++------
+ app/main.py           |   8 +--
+ app/taxonomy.py       | 119 ++++++++++++++++++++++++------------------
+ docker-compose.yml    |   2 +-
+ start.bat             |  19 +++++--
+ start.sh              |  10 ++--
+ static/css/app.css    |   2 +
+ static/js/app.js      |  40 +++++++++-----
+ static/js/deck.js     | 103 +++++++++++++++++++++++-------------
+ static/js/engine.js   |  10 ++--
+ tests/test_app.py     |  17 +++++-
+ 13 files changed, 236 insertions(+), 133 deletions(-)
+ create mode 100644 .gitattributes
+ mode change 100644 => 100755 start.sh
+
+diff --git a/.gitattributes b/.gitattributes
+new file mode 100644
+index 0000000..f5a7278
+--- /dev/null
++++ b/.gitattributes
+@@ -0,0 +1,3 @@
++# Windows batch files need CRLF line endings; shell scripts need LF.
++*.bat text eol=crlf
++*.sh text eol=lf
+diff --git a/README.md b/README.md
+index 9c2beac..94f8568 100644
+--- a/README.md
++++ b/README.md
+@@ -36,7 +36,7 @@ Pick **one** of the two ways. The computer must stay on while the team uses the
+    - **Mac / Linux:** open Terminal in the folder and run `./start.sh`
+ 
+    The first start installs what it needs (a minute or two). Later starts are instant. Keep the window open.
+-4. Open http://localhost:8000 on that computer and **create the admin account**.
++4. Open http://localhost:8010 on that computer and **create the admin account**.
+ 
+ ### Option B: Docker
+ 
+@@ -46,7 +46,7 @@ Install Docker Desktop, then in the project folder run:
+ docker compose up -d --build
+ ```
+ 
+-It restarts automatically with the computer. Open http://localhost:8000 and create the admin account.
++It restarts automatically with the computer. Open http://localhost:8010 and create the admin account.
+ 
+ ---
+ 
+@@ -55,7 +55,7 @@ It restarts automatically with the computer. Open http://localhost:8000 and crea
+ 1. Find the office computer's address:
+    - **Windows:** open Command Prompt, run `ipconfig`, note the **IPv4 Address** (for example `192.168.1.25`).
+    - **Mac:** System Settings → Wi-Fi → Details → IP address.
+-2. Salespeople open `http://192.168.1.25:8000` (your address) on any phone, tablet or laptop on the **same office network**.
++2. Salespeople open `http://192.168.1.25:8010` (your address) on any phone, tablet or laptop on the **same office network**.
+ 3. If it doesn't open from other devices on Windows, allow it through the firewall: when Windows asks on first start, choose **Allow access** for private networks (or Windows Security → Firewall → Allow an app → Python).
+ 4. Ask your router admin to give the office computer a **fixed IP address** so the link doesn't change.
+ 5. In the app, go to **Users** and add each salesperson with an email and starting password. They can change it under their name (top right).
+diff --git a/app/extract/ingest.py b/app/extract/ingest.py
+index 9757032..7eea27a 100644
+--- a/app/extract/ingest.py
++++ b/app/extract/ingest.py
+@@ -14,12 +14,12 @@ from openpyxl.styles import Font, PatternFill
+ from openpyxl.worksheet.datavalidation import DataValidation
+ 
+ from .. import db
+-from ..taxonomy import CATEGORIES, TYPE_CAT, TYPES, classify, finish_key
++from ..taxonomy import CATEGORY_GROUP, TYPE_CAT, TYPES, classify, finish_key
+ from . import pdf_parser
+ from .validate import validate
+ 
+ KNOWN_STYLES = {"TEVEO": "Round, soft forms", "TOPIA": "Square, geometric forms"}
+-TEMPLATE_COLS = ["Series", "Category", "Type", "Product name", "Specs (one per line)", "Article no.", "Finish", "Width mm", "Price", "Photo file name"]
++TEMPLATE_COLS = ["Series", "Type", "Product name", "Specs (one per line)", "Article no.", "Finish", "Width mm", "Price", "Photo file name"]
+ 
+ 
+ def _log(cat_id, msg):
+@@ -53,7 +53,7 @@ def store_products(con, cat_id, bid, products, profile=None):
+         p["specs"] = [{"group": g["group"], "items": [_clean(i) for i in g["items"]]} for g in p["specs"]]
+         if not p.get("type"):
+             p["type"], p["name"] = classify(p["title"], p["specs"], p.get("series", ""))
+-        p["category"] = p.get("category") or TYPE_CAT.get(p["type"], "Other")
++        p["category"] = TYPE_CAT.get(p["type"], "Other")
+         for v in p["variants"]:
+             v["finish_key"] = v.get("finish_key") or finish_key(v["finish"])
+         p["attributes"] = {**_attributes(p["specs"]), **p.get("attributes", {})}
+@@ -163,29 +163,26 @@ def write_template(path):
+     for c in ws[1]:
+         c.font = Font(bold=True, color="FFFFFF")
+         c.fill = PatternFill("solid", fgColor="2F6E72")
+-    ws.append(["TEVEO", "Washbasin", "basin_std", "Single lever basin mixer 110", "Outlet height: 104 mm\nProjection: 113 mm\nFlow rate: limited to 6 l/min", "582 04 01 01 00", "chrome-plated", "", 157.50, ""])
+-    ws.append(["TEVEO", "Washbasin", "basin_std", "Single lever basin mixer 110", "", "582 04 37 01 00", "matt black", "", 186.70, ""])
+-    widths = [14, 18, 20, 36, 44, 20, 26, 10, 10, 22]
++    ws.append(["TEVEO", "basin_std", "Single lever basin mixer 110", "Outlet height: 104 mm\nProjection: 113 mm\nFlow rate: limited to 6 l/min", "582 04 01 01 00", "chrome-plated", "", 157.50, ""])
++    ws.append(["TEVEO", "basin_std", "Single lever basin mixer 110", "", "582 04 37 01 00", "matt black", "", 186.70, ""])
++    widths = [14, 20, 36, 44, 20, 26, 10, 10, 22]
+     for i, w in enumerate(widths):
+         ws.column_dimensions[chr(65 + i)].width = w
+-    dv1 = DataValidation(type="list", formula1='"' + ",".join(CATEGORIES) + '"', allow_blank=True)
+-    dv2 = DataValidation(type="list", formula1="=Types!$A$2:$A$" + str(len(TYPES) + 1), allow_blank=True)
+-    ws.add_data_validation(dv1)
+-    ws.add_data_validation(dv2)
+-    dv1.add("B2:B5000")
+-    dv2.add("C2:C5000")
++    dv = DataValidation(type="list", formula1="=Types!$A$2:$A$" + str(len(TYPES) + 1), allow_blank=True)
++    ws.add_data_validation(dv)
++    dv.add("B2:B5000")
+     t = wb.create_sheet("Types")
+-    t.append(["Type key", "Meaning", "Category"])
++    t.append(["Type key", "Meaning", "Category", "Group"])
+     for k, l, c in TYPES:
+-        t.append([k, l, c])
++        t.append([k, l, c, CATEGORY_GROUP[c]])
+     t.column_dimensions["A"].width = 22
+     t.column_dimensions["B"].width = 50
+     h = wb.create_sheet("How to fill")
+     for line in [
+         "One row per article number (one finish or size of a product).",
+         "Rows with the same Series + Product name become one product with several finishes.",
+-        "Specs, Category and Type only need to be on the first row of each product.",
+-        "Type decides how the solution builder uses the product. See the Types sheet; leave blank to let the system guess.",
++        "Specs and Type only need to be on the first row of each product.",
++        "Type decides the product's category and how the solution builder uses it. See the Types sheet; leave blank to let the system guess from the name.",
+         "Photos: after upload, add a photo to each product on the review screen.",
+         "Prices: numbers only, in the brand's currency (set when uploading).",
+     ]:
+@@ -223,7 +220,6 @@ def read_template(path, default_series=""):
+                  "variants": [], "image": None}
+             if typ in TYPE_CAT:
+                 p["type"] = typ
+-                p["category"] = str(g("category") or "").strip() if str(g("category") or "").strip() in CATEGORIES else TYPE_CAT[typ]
+             by_key[key] = p
+             products.append(p)
+         p = by_key[key]
+diff --git a/app/main.py b/app/main.py
+index 87b394a..ba34494 100644
+--- a/app/main.py
++++ b/app/main.py
+@@ -15,7 +15,7 @@ from pydantic import BaseModel, Field
+ 
+ from . import auth, db
+ from .extract import ingest, profiles
+-from .taxonomy import CATEGORIES, FINISHES, TYPE_CAT, TYPES, finish_key
++from .taxonomy import CATEGORIES, FINISHES, GROUPS, TYPE_CAT, TYPES, finish_key, sync_categories
+ 
+ ROOT = Path(__file__).resolve().parent.parent
+ STATIC = ROOT / "static"
+@@ -24,6 +24,8 @@ VERSION = "1.0.0"
+ @asynccontextmanager
+ async def lifespan(_app):
+     db.init()
++    with db.connect() as c:
++        sync_categories(c)
+     with db.connect() as c:  # catalogs interrupted by a restart
+         c.execute("UPDATE catalogs SET status='failed', log=coalesce(log,'')||'Stopped: the server restarted during processing. Upload again.\n' WHERE status='processing'")
+     yield
+@@ -198,7 +200,7 @@ def put_settings(body: SettingsIn, _=Depends(auth.require_admin)):
+ # ---------- reference data ----------
+ @app.get("/api/meta")
+ def meta(_=Depends(auth.current_user)):
+-    return {"categories": CATEGORIES, "types": [{"key": k, "label": l, "category": c} for k, l, c in TYPES],
++    return {"categories": CATEGORIES, "groups": [{"name": g, "categories": cats} for g, cats in GROUPS], "types": [{"key": k, "label": l, "category": c} for k, l, c in TYPES],
+             "finishes": [{"key": k, "label": l, "color": col} for k, l, col in FINISHES],
+             "readers": profiles.all_readers()}
+ 
+@@ -416,7 +418,7 @@ class ProductIn(BaseModel):
+ def _save_product(c, pid, body: ProductIn):
+     if body.type not in TYPE_CAT:
+         raise HTTPException(400, "Unknown product type.")
+-    cat = body.category if body.category in CATEGORIES else TYPE_CAT[body.type]
++    cat = TYPE_CAT[body.type]  # category always follows the type
+     c.execute("UPDATE products SET series=?,category=?,type=?,name=?,specs=?,note=? WHERE id=?",
+               (body.series.strip(), cat, body.type, body.name.strip(), json.dumps(body.specs), body.note, pid))
+     keep = []
+diff --git a/app/taxonomy.py b/app/taxonomy.py
+index a853ff5..f6f5773 100644
+--- a/app/taxonomy.py
++++ b/app/taxonomy.py
+@@ -5,63 +5,80 @@ brand can be used once its type is set (by the parser or by the admin).
+ """
+ import re
+ 
+-CATEGORIES = ["Washbasin", "Bidet", "Shower", "Bath tub", "Hand & head showers", "Accessories", "Other"]
++# Two groups: the main products a customer chooses, and the accessories that go with
++# them. Each category belongs to one group; each type belongs to one category.
++GROUPS = [
++    ("Main products", ["Basin mixers", "Bidet & health faucets", "Shower mixers", "Bath mixers & spouts", "Shower heads", "Hand showers"]),
++    ("Accessories", ["Shower arms", "Hoses, outlets & holders", "Waste, traps & valves", "Towel holders", "Toilet paper holders", "Shelves & mirrors"]),
++    ("Other", ["Other"]),
++]
++CATEGORIES = [c for _, cats in GROUPS for c in cats]
++CATEGORY_GROUP = {c: g for g, cats in GROUPS for c in cats}
+ 
+ # key, label, category
+ TYPES = [
+-    ("basin_std", "Basin mixer, standard height", "Washbasin"),
+-    ("basin_mid", "Basin mixer, raised", "Washbasin"),
+-    ("basin_tall", "Basin mixer, tall (vessel basin)", "Washbasin"),
+-    ("basin_wall", "Basin mixer, wall-mounted concealed", "Washbasin"),
+-    ("basin_3hole", "Basin mixer, three-hole", "Washbasin"),
+-    ("waste", "Basin waste plug", "Washbasin"),
+-    ("trap", "Bottle trap", "Washbasin"),
+-    ("angle_valve", "Angle valve", "Washbasin"),
+-    ("bidet_spray", "Bidet spray set / health faucet", "Bidet"),
+-    ("bidet_concealed", "Bidet mixer, concealed", "Bidet"),
+-    ("shower_exposed", "Shower mixer, exposed", "Shower"),
+-    ("shower_exposed_bar", "Shower mixer, exposed (bar design)", "Shower"),
+-    ("shower_thermo_exposed", "Thermostatic shower mixer, exposed", "Shower"),
+-    ("conc_1f", "Concealed mixer, 1 function", "Shower"),
+-    ("conc_2f_push", "Concealed mixer, 2 functions, push diverter", "Shower"),
+-    ("conc_2f_rot", "Concealed mixer, 2 functions, rotating diverter", "Shower"),
+-    ("thermo_2f", "Thermostatic concealed, 2 functions", "Shower"),
+-    ("thermo_3f", "Thermostatic concealed, 3 functions", "Shower"),
+-    ("bath_exposed", "Bath mixer, exposed", "Bath tub"),
+-    ("bath_exposed_bar", "Bath mixer, exposed (bar design)", "Bath tub"),
+-    ("bath_exposed_set", "Bath mixer set with hand shower, exposed", "Bath tub"),
+-    ("bath_thermo_exposed", "Thermostatic bath mixer, exposed", "Bath tub"),
+-    ("bath_floor", "Bath mixer, floor-standing", "Bath tub"),
+-    ("bath_4hole", "Bath mixer, four-hole bath rim", "Bath tub"),
+-    ("bath_filler", "Bath filler / spout", "Bath tub"),
+-    ("bath_filler_div", "Bath filler with diverter", "Bath tub"),
+-    ("hand_shower", "Hand shower", "Hand & head showers"),
+-    ("shower_hose", "Shower hose", "Hand & head showers"),
+-    ("head_250", "Overhead shower, about 250 mm", "Hand & head showers"),
+-    ("head_300", "Overhead shower, about 300 mm", "Hand & head showers"),
+-    ("arm_wall", "Shower arm, wall-mounted", "Hand & head showers"),
+-    ("arm_ceiling", "Shower arm, ceiling-mounted", "Hand & head showers"),
+-    ("hose_union", "Hose union / wall outlet", "Hand & head showers"),
+-    ("hose_union_bracket", "Hose union with bracket", "Hand & head showers"),
+-    ("hose_union_set", "Hose union set with hand shower", "Hand & head showers"),
+-    ("hand_bracket", "Hand shower bracket", "Hand & head showers"),
+-    ("rail", "Hand shower sliding rail", "Hand & head showers"),
+-    ("rail_set", "Sliding rail set with hand shower", "Hand & head showers"),
+-    ("hook", "Towel hook", "Accessories"),
+-    ("hook_double", "Towel hook, double", "Accessories"),
+-    ("towel_ring", "Towel ring", "Accessories"),
+-    ("towel_rail", "Towel rail", "Accessories"),
+-    ("towel_rack", "Towel rack", "Accessories"),
+-    ("tp_rigid", "Toilet paper holder", "Accessories"),
+-    ("tp_swivel", "Toilet paper holder, swivelling", "Accessories"),
+-    ("tp_shelf", "Toilet paper holder with shelf", "Accessories"),
+-    ("tp_double_shelf", "Toilet paper holder, double, with shelf", "Accessories"),
+-    ("shower_shelf", "Shower shelf / basket", "Accessories"),
+-    ("mirror", "Cosmetic mirror", "Accessories"),
++    ("basin_std", "Basin mixer, standard height", "Basin mixers"),
++    ("basin_mid", "Basin mixer, raised", "Basin mixers"),
++    ("basin_tall", "Basin mixer, tall (vessel basin)", "Basin mixers"),
++    ("basin_wall", "Basin mixer, wall-mounted concealed", "Basin mixers"),
++    ("basin_3hole", "Basin mixer, three-hole", "Basin mixers"),
++    ("bidet_spray", "Bidet spray set / health faucet", "Bidet & health faucets"),
++    ("bidet_concealed", "Bidet mixer, concealed", "Bidet & health faucets"),
++    ("shower_exposed", "Shower mixer, exposed", "Shower mixers"),
++    ("shower_exposed_bar", "Shower mixer, exposed (bar design)", "Shower mixers"),
++    ("shower_thermo_exposed", "Thermostatic shower mixer, exposed", "Shower mixers"),
++    ("conc_1f", "Concealed mixer, 1 function", "Shower mixers"),
++    ("conc_2f_push", "Concealed mixer, 2 functions, push diverter", "Shower mixers"),
++    ("conc_2f_rot", "Concealed mixer, 2 functions, rotating diverter", "Shower mixers"),
++    ("thermo_2f", "Thermostatic concealed, 2 functions", "Shower mixers"),
++    ("thermo_3f", "Thermostatic concealed, 3 functions", "Shower mixers"),
++    ("bath_exposed", "Bath mixer, exposed", "Bath mixers & spouts"),
++    ("bath_exposed_bar", "Bath mixer, exposed (bar design)", "Bath mixers & spouts"),
++    ("bath_exposed_set", "Bath mixer set with hand shower, exposed", "Bath mixers & spouts"),
++    ("bath_thermo_exposed", "Thermostatic bath mixer, exposed", "Bath mixers & spouts"),
++    ("bath_floor", "Bath mixer, floor-standing", "Bath mixers & spouts"),
++    ("bath_4hole", "Bath mixer, four-hole bath rim", "Bath mixers & spouts"),
++    ("bath_filler", "Bath filler / spout", "Bath mixers & spouts"),
++    ("bath_filler_div", "Bath filler with diverter", "Bath mixers & spouts"),
++    ("head_250", "Overhead shower, about 250 mm", "Shower heads"),
++    ("head_300", "Overhead shower, about 300 mm", "Shower heads"),
++    ("hand_shower", "Hand shower", "Hand showers"),
++    ("rail_set", "Sliding rail set with hand shower", "Hand showers"),
++    ("hose_union_set", "Hose union set with hand shower", "Hand showers"),
++    ("arm_wall", "Shower arm, wall-mounted", "Shower arms"),
++    ("arm_ceiling", "Shower arm, ceiling-mounted", "Shower arms"),
++    ("shower_hose", "Shower hose", "Hoses, outlets & holders"),
++    ("hose_union", "Hose union / wall outlet", "Hoses, outlets & holders"),
++    ("hose_union_bracket", "Hose union with bracket", "Hoses, outlets & holders"),
++    ("hand_bracket", "Hand shower bracket", "Hoses, outlets & holders"),
++    ("rail", "Hand shower sliding rail", "Hoses, outlets & holders"),
++    ("waste", "Basin waste plug", "Waste, traps & valves"),
++    ("trap", "Bottle trap", "Waste, traps & valves"),
++    ("angle_valve", "Angle valve", "Waste, traps & valves"),
++    ("hook", "Towel hook", "Towel holders"),
++    ("hook_double", "Towel hook, double", "Towel holders"),
++    ("towel_ring", "Towel ring", "Towel holders"),
++    ("towel_rail", "Towel rail", "Towel holders"),
++    ("towel_rack", "Towel rack", "Towel holders"),
++    ("tp_rigid", "Toilet paper holder", "Toilet paper holders"),
++    ("tp_swivel", "Toilet paper holder, swivelling", "Toilet paper holders"),
++    ("tp_shelf", "Toilet paper holder with shelf", "Toilet paper holders"),
++    ("tp_double_shelf", "Toilet paper holder, double, with shelf", "Toilet paper holders"),
++    ("shower_shelf", "Shower shelf / basket", "Shelves & mirrors"),
++    ("mirror", "Cosmetic mirror", "Shelves & mirrors"),
+     ("other", "Other (not used by the solution builder)", "Other"),
+ ]
+ TYPE_CAT = {k: c for k, _, c in TYPES}
+ TYPE_LABEL = {k: l for k, l, _ in TYPES}
++assert all(c in CATEGORY_GROUP for c in TYPE_CAT.values())
++
++
++def sync_categories(con):
++    """Category always follows the product's type. Re-applied at start-up so databases
++    created with older category names pick up the current ones."""
++    for k, c in TYPE_CAT.items():
++        con.execute("UPDATE products SET category=? WHERE type=? AND category!=?", (c, k, c))
++    con.execute("UPDATE products SET type='other', category='Other' WHERE type NOT IN (%s)" % ",".join("?" * len(TYPE_CAT)), tuple(TYPE_CAT))
+ 
+ FINISHES = [
+     ("chrome", "Chrome", "C9CED3"), ("black", "Matt black", "232323"), ("nickel", "Brushed nickel", "A9A498"),
+@@ -180,6 +197,8 @@ def classify(title: str, specs: list, series: str = ""):
+     elif "shower head" in T or "overhead" in T or "rain shower" in T or "head shower" in T:
+         d = _num(specs, "Diameter") or _num(specs, "Dimension") or _num(specs, "Size")
+         t = "head_300" if (d or 250) >= 280 else "head_250"
++        if d and not re.search(r"\d", name):
++            name = f"{name} {int(d)} mm"
+     elif "shower arm" in T and "ceiling" in T:
+         t = "arm_ceiling"
+     elif "shower arm" in T:
+diff --git a/docker-compose.yml b/docker-compose.yml
+index 8e8408e..ac001d9 100644
+--- a/docker-compose.yml
++++ b/docker-compose.yml
+@@ -3,7 +3,7 @@ services:
+     build: .
+     container_name: bath-solution-studio
+     ports:
+-      - "8000:8000"
++      - "8010:8000"   # open http://localhost:8010
+     volumes:
+       - ./data:/app/data   # database, product photos and uploaded price lists live here
+     restart: unless-stopped
+diff --git a/start.bat b/start.bat
+index 9e07631..4e8052a 100644
+--- a/start.bat
++++ b/start.bat
+@@ -1,5 +1,6 @@
+ @echo off
+ REM Start Bath Solution Studio without Docker (Windows). Needs Python 3.10+ from python.org.
++REM To always use a particular port, change 8010 below.
+ cd /d "%~dp0"
+ if not exist .venv (
+   echo First run: setting up, this takes a minute...
+@@ -7,12 +8,24 @@ if not exist .venv (
+   .venv\Scripts\python -m pip install --upgrade pip
+   .venv\Scripts\pip install -r requirements.txt
+ )
+-if "%PORT%"=="" set PORT=8000
++if "%PORT%"=="" set PORT=8010
++
++:checkport
++netstat -ano | findstr /R /C:"TCP.*:%PORT% .*LISTENING" >nul
++if not errorlevel 1 (
++  echo Port %PORT% is already used by another program. Trying the next one...
++  set /a PORT=%PORT%+1
++  goto checkport
++)
++
+ echo.
+-echo Bath Solution Studio is running.
++echo Bath Solution Studio is starting.
+ echo   On this computer:   http://localhost:%PORT%
+-echo   For the sales team: http://THIS-COMPUTER-IP:%PORT%   (run "ipconfig" to see the IPv4 address)
++for /f "tokens=2 delims=:" %%a in ('ipconfig ^| findstr /C:"IPv4"') do for /f "tokens=*" %%b in ("%%a") do echo   For the sales team: http://%%b:%PORT%
++echo   (If several addresses are listed, use the one on your office network.)
+ echo Keep this window open. Close it to stop the app.
+ echo.
+ .venv\Scripts\uvicorn app.main:app --host 0.0.0.0 --port %PORT%
++echo.
++echo The app stopped. If you see an error above, send it to your admin.
+ pause
+diff --git a/start.sh b/start.sh
+old mode 100644
+new mode 100755
+index 6e4b283..52d433f
+--- a/start.sh
++++ b/start.sh
+@@ -8,10 +8,14 @@ if [ ! -d .venv ]; then
+   .venv/bin/pip install --upgrade pip >/dev/null
+   .venv/bin/pip install -r requirements.txt
+ fi
+-PORT="${PORT:-8000}"
+-IP=$( (ipconfig getifaddr en0 2>/dev/null || hostname -I 2>/dev/null | awk '{print $1}') )
++PORT="${PORT:-8010}"
++while .venv/bin/python -c "import socket,sys; s=socket.socket(); sys.exit(0 if s.connect_ex(('127.0.0.1', $PORT)) == 0 else 1)"; do
++  echo "Port $PORT is already used by another program. Trying the next one…"
++  PORT=$((PORT + 1))
++done
++IP=$( (ipconfig getifaddr en0 2>/dev/null || hostname -I 2>/dev/null | awk '{print $1}') || true )
+ echo ""
+-echo "Bath Solution Studio is running."
++echo "Bath Solution Studio is starting."
+ echo "  On this computer:        http://localhost:$PORT"
+ [ -n "$IP" ] && echo "  For the sales team:      http://$IP:$PORT"
+ echo "Keep this window open. Press Ctrl+C to stop."
+diff --git a/static/css/app.css b/static/css/app.css
+index 8242db3..1d1db84 100644
+--- a/static/css/app.css
++++ b/static/css/app.css
+@@ -161,3 +161,5 @@ pre.log{white-space:pre-wrap;font-family:var(--mono);font-size:12px;max-height:2
+ .dirty{box-shadow:inset 3px 0 0 var(--accent)}
+ .confirm{color:var(--warn)!important;border-color:var(--warn)!important}
+ .saved{font-size:12px;color:var(--sub)}
++.grouphead{font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--sub);padding:12px 0 2px;border-bottom:1px solid var(--line)}
++.cathead.small{margin-top:10px;gap:10px;font-size:13px}
+diff --git a/static/js/app.js b/static/js/app.js
+index 9c6c5f6..bdfe68f 100644
+--- a/static/js/app.js
++++ b/static/js/app.js
+@@ -72,6 +72,10 @@ async function loadCatalog() {
+   S.catalog = await api('GET', '/api/catalog');
+   S.E = Engine.make(S.catalog, S.meta);
+   const b = S.catalog.brands[0];
++  if (S.range) {  // saved choices from an earlier version may use old category names
++    S.range.categories = (S.range.categories || []).filter(c => S.meta.categories.includes(c));
++    if (!S.range.categories.length) S.range.categories = S.meta.categories.slice();
++  }
+   if (!S.range || !S.catalog.brands.find(x => x.name === S.range.brand)) {
+     S.range = b ? { brand: b.name, series: b.series.map(s => s.name), categories: S.meta.categories.slice(), finishes: S.meta.finishes.map(f => f.key), exclude: [], layout: 'detail', showPrices: false, title: `${b.name} collections`, recipient: '' } : null;
+   }
+@@ -157,7 +161,11 @@ async function openProject(id) {
+   S.project.rooms.forEach(r => {
+     if (!S.E.brandOf(r.brand)) Object.assign(r, defaultsFor());
+     if (!r.edited) rebuild(r);
+-    else r.items = r.items.filter(i => S.E.byId[i.pid] || (r.warnings = [...(r.warnings || []), `${i.name} (${i.art}) is no longer in the catalog and was removed.`], false));
++    else {
++      r.items = r.items.filter(i => S.E.byId[i.pid] || (r.warnings = [...(r.warnings || []), `${i.name} (${i.art}) is no longer in the catalog and was removed.`], false));
++      r.items.forEach(i => { i.category = S.E.byId[i.pid].category; });
++      r.items = S.E.sortItems(r.items);
++    }
+   });
+   renderProject();
+ }
+@@ -230,7 +238,7 @@ function itemRow(r, it) {
+ }
+ function addSelect(r) {
+   const groups = S.meta.categories.map(c => [c, S.catalog.products.filter(p => p.brand === r.brand && p.category === c).sort((a, b) => (a.series === r.series ? -1 : 1) - (b.series === r.series ? -1 : 1))]).filter(g => g[1].length);
+-  return `<select class="add" aria-label="Add a product" id="add-${r.id}" data-act="add" data-room="${r.id}"><option value="">+ Add a product…</option>${groups.map(([c, ps]) => `<optgroup label="${esc(c)}">${ps.map(p => `<option value="${p.id}">${esc(p.series + ' · ' + p.name)}</option>`).join('')}</optgroup>`).join('')}</select>`;
++  return `<select class="add" aria-label="Add a product" id="add-${r.id}" data-act="add" data-room="${r.id}"><option value="">+ Add a product…</option>${groups.map(([c, ps]) => `<optgroup label="${esc(S.E.groupOf(c) + ' · ' + c)}">${ps.map(p => `<option value="${p.id}">${esc(p.series + ' · ' + p.name)}</option>`).join('')}</optgroup>`).join('')}</select>`;
+ }
+ function roomCard(r) {
+   const b = S.E.brandOf(r.brand) || {};
+@@ -246,7 +254,10 @@ function roomCard(r) {
+       <div class="items">
+         ${r.edited ? `<div class="warns" style="background:var(--accent-soft);color:var(--ink);display:flex;gap:10px;align-items:center;justify-content:space-between;flex-wrap:wrap"><p>You edited this list by hand. Changes to the form on the left won't apply until you rebuild.</p><button class="btn" type="button" data-act="rebuild" data-room="${r.id}">Rebuild from form</button></div>` : ''}
+         ${(r.warnings || []).length ? `<div class="warns">${r.warnings.map(w => `<p>${esc(w)}</p>`).join('')}</div>` : ''}
+-        ${r.items.length ? r.items.map(it => itemRow(r, it)).join('') : '<div class="empty">No products yet. Choose fixtures on the left or add a product.</div>'}
++        ${r.items.length ? r.items.map((it, i) => {
++          const g = S.E.groupOf(it.category), prev = i ? S.E.groupOf(r.items[i - 1].category) : null;
++          return (g && g !== prev ? `<div class="grouphead">${esc(g)}</div>` : '') + itemRow(r, it);
++        }).join('') : '<div class="empty">No products yet. Choose fixtures on the left or add a product.</div>'}
+         <div class="room-foot">${addSelect(r)}<span class="muted small">${esc(b.price_basis || '')} · ${esc(b.currency || '')}</span></div>
+       </div>
+     </div></section>`;
+@@ -291,7 +302,7 @@ async function pptSolution(btn) {
+     const brands = [...new Set(P.rooms.map(r => r.brand))].map(n => S.E.brandOf(n)).filter(Boolean);
+     const rooms = P.rooms.map(r => ({ ...r, style: ((S.E.brandOf(r.brand) || { series: [] }).series.find(s => s.name === r.series) || {}).style || '', finishLabel: S.E.finishLabel(r.finish), brief: briefOf(r) }));
+     const pptx = new PptxGenJS();
+-    DeckBuilder.buildSolution(pptx, { title: P.title, customer: P.customer, site: P.site, salesperson: S.me.name, dealer: st.dealer, notes: P.notes, date: today(), rooms,
++    DeckBuilder.buildSolution(pptx, { groupOf: S.E.groupOf, title: P.title, customer: P.customer, site: P.site, salesperson: S.me.name, dealer: st.dealer, notes: P.notes, date: today(), rooms,
+       currency: brands[0] ? brands[0].currency : 'EUR', priceNote: brands.map(b => `${b.name}: ${b.price_basis}, ${b.currency}`).join('; '), sources: brands.map(b => `${b.name} ${b.catalog}`).join(', ') }, img);
+     download(slug(P.title) + '-proposal.pptx', await pptx.write({ outputType: 'blob' }));
+   } catch (e) { toast('Could not build the deck: ' + e.message); }
+@@ -304,13 +315,17 @@ function viewRange() {
+   const R = S.range, E = S.E, b = E.brandOf(R.brand);
+   const all = E.rangeGroups({ ...R, exclude: [] }), groups = E.rangeGroups(R);
+   const count = groups.reduce((a, g) => a + g.products.length, 0);
+-  const slides = 2 + groups.length + (R.layout === 'grid' ? groups.reduce((a, g) => a + Math.ceil(g.products.length / 6), 0) : count);
++  const slides = 2 + groups.reduce((a, g) => {
++    const grps = new Set(g.products.map(p => E.groupOf(p.category)));
++    const perCat = Object.values(g.products.reduce((m, p) => (m[p.category] = (m[p.category] || 0) + 1, m), {}));
++    return a + 1 + (grps.size > 1 ? grps.size : 0) + (R.layout === 'grid' ? perCat.reduce((x, n) => x + Math.ceil(n / 6), 0) : g.products.length);
++  }, 0);
+   $('#main').innerHTML = `<h1>Brand range deck</h1><p class="lede">Send an architect or designer a brand's range, or keep a brand-wise reference for the sales team. Every product gets its finishes and article numbers.</p>
+   <div class="range">
+     <section class="card panel">
+       <label class="field"><span>Brand</span><select id="r-brand" data-r="brand">${opts(S.catalog.brands.map(x => [x.name, x.name]), R.brand)}</select><span class="muted small" style="text-transform:none;letter-spacing:0;font-weight:400">${esc(b.catalog)} · ${esc(b.price_basis)} · ${esc(b.currency)}</span></label>
+       <div class="field"><span>Collections</span><div class="checks">${b.series.map(s => `<label><input type="checkbox" id="rs-${esc(s.name)}" data-rlist="series" value="${esc(s.name)}" ${R.series.includes(s.name) ? 'checked' : ''}> ${esc(s.name)} <span class="muted small">${esc(s.style)}</span></label>`).join('')}</div></div>
+-      <div class="field"><span>Categories</span><div class="checks">${S.meta.categories.map(c => `<label><input type="checkbox" data-rlist="categories" value="${esc(c)}" ${R.categories.includes(c) ? 'checked' : ''}> ${esc(c)}</label>`).join('')}</div></div>
++      ${S.meta.groups.filter(g => g.name !== 'Other').map(g => `<div class="field"><span>${esc(g.name)}</span><div class="checks">${g.categories.map(c => `<label><input type="checkbox" data-rlist="categories" value="${esc(c)}" ${R.categories.includes(c) ? 'checked' : ''}> ${esc(c)}</label>`).join('')}</div></div>`).join('')}
+       <div class="field"><span>Finishes to list</span><div class="checks">${S.meta.finishes.map(f => `<label><input type="checkbox" data-rlist="finishes" value="${f.key}" ${R.finishes.includes(f.key) ? 'checked' : ''}> <span class="dot" style="background:#${f.color}"></span> ${esc(f.label)}</label>`).join('')}</div></div>
+       <div class="field"><span>Layout</span>${seg('rlayout', [['detail', 'One product per slide'], ['grid', 'Overview, 6 per slide']], R.layout)}</div>
+       <label><input type="checkbox" id="r-prices" data-rbool="showPrices" ${R.showPrices ? 'checked' : ''}> Show prices (internal use)</label>
+@@ -320,9 +335,10 @@ function viewRange() {
+     <section class="card">
+       <div class="room-head"><b>${count} products</b><span class="muted small">about ${slides} slides · ${R.showPrices ? 'with prices' : 'no prices'}</span>
+         <div class="sub"><button class="btn ghost" type="button" data-act="rall">Include all</button></div></div>
+-      ${all.length ? all.map(g => `<div class="grid"><div class="cathead"><h2>${esc(g.series)}</h2><span class="muted small">${esc(g.style)}</span></div>${g.products.map(p => {
++      ${all.length ? all.map(g => `<div class="grid"><div class="cathead"><h2>${esc(g.series)}</h2><span class="muted small">${esc(g.style)}</span></div>${g.products.map((p, i) => {
+         const on = !R.exclude.includes(p.id);
+-        return `<label class="tile ${on ? '' : 'off'}"><input type="checkbox" data-rx="${p.id}" ${on ? 'checked' : ''}><div class="im">${p.image ? `<img alt="" loading="lazy" src="${esc(p.image)}">` : ''}</div><div class="tx"><span class="c">${esc(p.category)}</span><span class="n">${esc(p.name)}</span><span>${p.variants.map(v => `<span class="dot" style="background:${swc(v.finish_key)}"></span>`).join(' ')}</span></div></label>`;
++        const head = !i || g.products[i - 1].category !== p.category ? `<div class="cathead small"><b>${esc(p.category)}</b><span class="muted">${esc(E.groupOf(p.category))}</span></div>` : '';
++        return head + `<label class="tile ${on ? '' : 'off'}"><input type="checkbox" data-rx="${p.id}" ${on ? 'checked' : ''}><div class="im">${p.image ? `<img alt="" loading="lazy" src="${esc(p.image)}">` : ''}</div><div class="tx"><span class="c">${esc(p.category)}</span><span class="n">${esc(p.name)}</span><span>${p.variants.map(v => `<span class="dot" style="background:${swc(v.finish_key)}"></span>`).join(' ')}</span></div></label>`;
+       }).join('')}</div>`).join('') : '<div class="empty">Pick at least one collection and category.</div>'}
+     </section>
+   </div>`;
+@@ -337,7 +353,7 @@ async function pptRange(btn) {
+     const groups = S.E.rangeGroups(R);
+     const img = await dataUrls(groups.flatMap(g => g.products.map(p => p.image)));
+     const pptx = new PptxGenJS();
+-    DeckBuilder.buildRange(pptx, { brand: R.brand, catalog: b.catalog, currency: b.currency, priceNote: `${b.price_basis}, ${b.currency}`, title: R.title || `${R.brand} collections`, recipient: R.recipient,
++    DeckBuilder.buildRange(pptx, { groupOf: S.E.groupOf, brand: R.brand, catalog: b.catalog, currency: b.currency, priceNote: `${b.price_basis}, ${b.currency}`, title: R.title || `${R.brand} collections`, recipient: R.recipient,
+       salesperson: S.me.name, dealer: st.dealer, contact: st.contact, date: today(), showPrices: R.showPrices, layout: R.layout, groups }, img);
+     download(slug(R.title || R.brand) + '-range.pptx', await pptx.write({ outputType: 'blob' }));
+   } catch (e) { toast('Could not build the deck: ' + e.message); }
+@@ -367,7 +383,7 @@ function viewCatalog() {
+       <input type="text" id="c-q" data-c="q" value="${esc(C.q)}" placeholder="Search name, spec or article no." style="max-width:300px">
+       <select id="c-b" data-c="brand" style="width:auto"><option value="">All brands</option>${opts(S.catalog.brands.map(b => [b.name, b.name]), C.brand)}</select>
+       ${brand ? `<select id="c-s" data-c="series" style="width:auto"><option value="">All collections</option>${opts(brand.series.map(s => [s.name, s.name]), C.series)}</select>` : ''}
+-      <select id="c-c" data-c="category" style="width:auto"><option value="">All categories</option>${opts(S.meta.categories.map(c => [c, c]), C.category)}</select>
++      <select id="c-c" data-c="category" style="width:auto"><option value="">All categories</option>${S.meta.groups.map(g => `<optgroup label="${esc(g.name)}">${opts(g.categories.map(c => [c, c]), C.category)}</optgroup>`).join('')}</select>
+       <div class="sub muted small" id="c-count">${rows.length} products</div>
+     </div>
+     <div class="tbl" id="c-tbl">${catTable(rows)}</div>
+@@ -448,7 +464,7 @@ function renderReview() {
+   const R = S.review, c = R.catalog, only = R.only, q = (R.q || '').toLowerCase();
+   const list = R.products.filter(p => (!only || needsWork(p)) && (!q || (p.name + ' ' + p.series + ' ' + p.variants.map(v => v.art).join(' ')).toLowerCase().includes(q)));
+   const nWork = R.products.filter(needsWork).length;
+-  const typeOpts = S.meta.categories.map(cat => `<optgroup label="${esc(cat)}">${S.meta.types.filter(t => t.category === cat).map(t => `<option value="${t.key}">${esc(t.label)}</option>`).join('')}</optgroup>`).join('');
++  const typeOpts = S.meta.categories.map(cat => `<optgroup label="${esc(S.E.groupOf(cat) + ' · ' + cat)}">${S.meta.types.filter(t => t.category === cat).map(t => `<option value="${t.key}">${esc(t.label)}</option>`).join('')}</optgroup>`).join('');
+   $('#main').innerHTML = `<a href="#/admin/catalogs" class="small">← All catalogs</a>
+   <div class="row" style="justify-content:space-between;margin-top:4px"><div><h1>${esc(c.brand)} · ${esc(c.name)} <span class="status ${c.status}">${c.status}</span></h1>
+     <p class="lede">${R.products.length} products from ${esc(c.filename || '')}. ${nWork ? `${nWork} need attention.` : 'Nothing flagged.'} Sales see this catalog only after you publish it.</p></div></div>
+@@ -572,7 +588,7 @@ function viewSettings() {
+ /* ---------- events ---------- */
+ const roomOf = el => S.project.rooms.find(r => r.id === el.dataset.room);
+ const setPath = (o, path, v) => { const k = path.split('.'); let t = o; k.slice(0, -1).forEach(x => t = t[x]); t[k[k.length - 1]] = v; };
+-function changed(r) { if (r && !r.edited) rebuild(r); saveSoon(); renderProject(); }
++function changed(r) { if (r && !r.edited) rebuild(r); else if (r) r.items = S.E.sortItems(r.items); saveSoon(); renderProject(); }
+ function saveRange() { store.set('bss.range', S.range); viewRange(); }
+ 
+ document.addEventListener('click', async e => {
+diff --git a/static/js/deck.js b/static/js/deck.js
+index e861351..739b2ec 100644
+--- a/static/js/deck.js
++++ b/static/js/deck.js
+@@ -77,37 +77,53 @@
+       if (proj.notes) s.addText([{ text: 'Requirement notes  ', options: { bold: true, color: C.accent } }, { text: proj.notes }], { x: 0.5, y: 5.6, w: W - 1, h: 1.1, fontFace: FONT, fontSize: 11, color: C.sub, valign: 'top', margin: 0 });
+       footer(s, foot, n++);
+     }
+-    // Room slides
++    // Room slides: main products first, then accessories, each on their own slide(s)
++    const groupOf = proj.groupOf || (() => '');
++    const splitByGroup = items => {
++      const out = [];
++      items.forEach(i => { const g = groupOf(i.category); let e = out.find(x => x.group === g); if (!e) out.push(e = { group: g, items: [] }); e.items.push(i); });
++      return out;
++    };
+     proj.rooms.forEach(r => {
+       const per = 8;
+-      for (let p = 0; p < Math.max(1, Math.ceil(r.items.length / per)); p++) {
+-        const s = pptx.addSlide();
+-        const chunk = r.items.slice(p * per, p * per + per);
+-        header(s, `${r.brand} ${r.series}  ·  ${r.finishLabel}`, r.name + (p ? ' (continued)' : ''), r.brief || '');
+-        const cw = 2.95, ch = 2.62, gx = 0.17, gy = 0.2, x0 = 0.5, y0 = 1.55;
+-        chunk.forEach((it, i) => {
+-          const cx = x0 + (i % 4) * (cw + gx), cy = y0 + Math.floor(i / 4) * (ch + gy);
+-          s.addShape('rect', { x: cx, y: cy, w: cw, h: ch, fill: { color: C.white }, line: { color: C.line, width: 0.75 } });
+-          s.addShape('rect', { x: cx, y: cy, w: cw, h: 1.25, fill: { color: C.mist }, line: { color: C.mist } });
+-          pic(s, img(it.image), { x: cx + 0.6, y: cy + 0.08, w: cw - 1.2, h: 1.09, sizing: { type: 'contain', w: cw - 1.2, h: 1.09 } });
+-          if (it.qty > 1) s.addText('×' + it.qty, { x: cx + cw - 0.62, y: cy + 0.08, w: 0.52, h: 0.28, fontFace: FONT, fontSize: 10, bold: true, color: C.white, fill: { color: C.accent }, align: 'center', margin: 0 });
+-          s.addText([
+-            { text: it.name, options: { fontSize: 11, bold: true, color: C.ink, breakLine: true } },
+-            { text: it.art + '  ·  ' + it.finish, options: { fontSize: 9, color: C.sub, breakLine: true } },
+-            { text: it.why || '', options: { fontSize: 9, italic: true, color: C.accent } }
+-          ], { x: cx + 0.12, y: cy + 1.32, w: cw - 0.24, h: 0.95, fontFace: FONT, valign: 'top', margin: 0, paraSpaceAfter: 2 });
+-          s.addText(money(it.qty * it.price), { x: cx + 0.12, y: cy + ch - 0.36, w: cw - 0.24, h: 0.28, fontFace: FONT, fontSize: 11, bold: true, color: C.ink, align: 'right', margin: 0 });
+-        });
+-        const t = r.items.reduce((a, i) => a + i.qty * i.price, 0);
+-        s.addText(`Room subtotal  ${money(t)}`, { x: W - 4.5, y: 0.3, w: 4, h: 0.3, fontFace: FONT, fontSize: 11, bold: true, color: C.ink, align: 'right', margin: 0 });
+-        footer(s, foot, n++);
+-      }
++      const parts = splitByGroup(r.items);
++      if (!parts.length) parts.push({ group: '', items: [] });
++      const t = r.items.reduce((a, i) => a + i.qty * i.price, 0);
++      parts.forEach(part => {
++        const pages = Math.max(1, Math.ceil(part.items.length / per));
++        for (let p = 0; p < pages; p++) {
++          const s = pptx.addSlide();
++          const chunk = part.items.slice(p * per, p * per + per);
++          const title = r.name + (part.group && parts.length > 1 ? `  ·  ${part.group}` : '') + (p ? ' (continued)' : '');
++          header(s, `${r.brand} ${r.series}  ·  ${r.finishLabel}`, title, part === parts[0] && !p ? (r.brief || '') : '');
++          const cw = 2.95, ch = 2.62, gx = 0.17, gy = 0.2, x0 = 0.5, y0 = 1.55;
++          chunk.forEach((it, i) => {
++            const cx = x0 + (i % 4) * (cw + gx), cy = y0 + Math.floor(i / 4) * (ch + gy);
++            s.addShape('rect', { x: cx, y: cy, w: cw, h: ch, fill: { color: C.white }, line: { color: C.line, width: 0.75 } });
++            s.addShape('rect', { x: cx, y: cy, w: cw, h: 1.25, fill: { color: C.mist }, line: { color: C.mist } });
++            pic(s, img(it.image), { x: cx + 0.6, y: cy + 0.08, w: cw - 1.2, h: 1.09, sizing: { type: 'contain', w: cw - 1.2, h: 1.09 } });
++            if (it.qty > 1) s.addText('×' + it.qty, { x: cx + cw - 0.62, y: cy + 0.08, w: 0.52, h: 0.28, fontFace: FONT, fontSize: 10, bold: true, color: C.white, fill: { color: C.accent }, align: 'center', margin: 0 });
++            s.addText([
++              { text: (it.category || '').toUpperCase(), options: { fontSize: 7.5, bold: true, color: C.accent, charSpacing: 1, breakLine: true } },
++              { text: it.name, options: { fontSize: 11, bold: true, color: C.ink, breakLine: true } },
++              { text: it.art + '  ·  ' + it.finish, options: { fontSize: 9, color: C.sub, breakLine: true } },
++              { text: it.why || '', options: { fontSize: 9, italic: true, color: C.accent } }
++            ], { x: cx + 0.12, y: cy + 1.3, w: cw - 0.24, h: 0.97, fontFace: FONT, valign: 'top', margin: 0, paraSpaceAfter: 2 });
++            s.addText(money(it.qty * it.price), { x: cx + 0.12, y: cy + ch - 0.36, w: cw - 0.24, h: 0.28, fontFace: FONT, fontSize: 11, bold: true, color: C.ink, align: 'right', margin: 0 });
++          });
++          s.addText(`Room subtotal  ${money(t)}`, { x: W - 4.5, y: 0.3, w: 4, h: 0.3, fontFace: FONT, fontSize: 11, bold: true, color: C.ink, align: 'right', margin: 0 });
++          footer(s, foot, n++);
++        }
++      });
+     });
+-    // Bill of quantities
++    // Bill of quantities, grouped by room, then main products / accessories
+     const lines = [];
+     proj.rooms.forEach(r => {
+       lines.push({ room: r.name });
+-      r.items.forEach(i => lines.push(i));
++      splitByGroup(r.items).forEach(part => {
++        if (part.group) lines.push({ grp: part.group });
++        part.items.forEach(i => lines.push(i));
++      });
+       lines.push({ sub: r.items.reduce((a, i) => a + i.qty * i.price, 0) });
+     });
+     const pages = Math.ceil(lines.length / 14); const per = Math.ceil(lines.length / pages);
+@@ -118,6 +134,7 @@
+       const rows = [head];
+       lines.slice(p * per, p * per + per).forEach(l => {
+         if (l.room) rows.push([{ text: l.room, options: { bold: true, color: C.accent, colspan: 6 } }]);
++        else if (l.grp) rows.push([{ text: l.grp, options: { italic: true, color: C.sub, colspan: 6 } }]);
+         else if (l.sub != null) rows.push([{ text: 'Subtotal', options: { colspan: 5, align: 'right', color: C.sub } }, { text: money(l.sub), options: { bold: true, align: 'right' } }]);
+         else rows.push([l.art, l.name, l.finish, { text: String(l.qty), options: { align: 'right' } }, { text: money(l.price), options: { align: 'right' } }, { text: money(l.qty * l.price), options: { align: 'right' } }]);
+       });
+@@ -166,30 +183,43 @@
+       d.addText(sel.brand.toUpperCase(), { x: 0.8, y: 1.6, w: 6, h: 0.35, fontFace: FONT, fontSize: 12, bold: true, color: C.accent, charSpacing: 3, margin: 0 });
+       d.addText(g.series, { x: 0.8, y: 2.0, w: 6.5, h: 1.2, fontFace: HFONT, fontSize: 60, color: C.ink, margin: 0 });
+       d.addText(`${g.style}  ·  ${g.products.length} products`, { x: 0.8, y: 3.25, w: 6.5, h: 0.4, fontFace: FONT, fontSize: 16, color: C.sub, margin: 0 });
+-      const cats = [...new Set(g.products.map(p => p.category))];
+-      d.addText(cats.join('   ·   '), { x: 0.8, y: 3.8, w: 6.5, h: 0.8, fontFace: FONT, fontSize: 12, color: C.sub, valign: 'top', margin: 0 });
++      const groupOf = sel.groupOf || (() => '');
++      const parts = [];
++      g.products.forEach(p => { const k = groupOf(p.category); let e = parts.find(x => x.group === k); if (!e) parts.push(e = { group: k, products: [] }); e.products.push(p); });
++      d.addText(parts.map(pt => ({ text: (pt.group ? pt.group + ':  ' : '') + [...new Set(pt.products.map(p => p.category))].join(' · '), options: { breakLine: true } })),
++        { x: 0.8, y: 3.8, w: 6.5, h: 1.0, fontFace: FONT, fontSize: 12, color: C.sub, valign: 'top', margin: 0, paraSpaceAfter: 4 });
+       d.addText('FINISHES', { x: 0.8, y: 5.0, w: 3, h: 0.3, fontFace: FONT, fontSize: 10, bold: true, color: C.sub, charSpacing: 2, margin: 0 });
+       g.finishes.forEach((f, i) => {
+         const x = 0.8 + i * 1.05;
+         swatch(d, f.key, x, 5.4, 0.42);
+         d.addText(f.short, { x: x - 0.25, y: 5.88, w: 0.92, h: 0.4, fontFace: FONT, fontSize: 9, color: C.sub, align: 'center', margin: 0 });
+       });
+-      const hero = g.products.slice(0, 4);
++      const hero = parts[0].products.slice(0, 4);
+       hero.forEach((p, i) => {
+         const x = 7.6 + (i % 2) * 2.75, y = 0.9 + Math.floor(i / 2) * 2.95;
+         d.addShape('rect', { x, y, w: 2.6, h: 2.8, fill: { color: C.white }, line: { color: C.white } });
+         pic(d, img(p.image), { x: x + 0.25, y: y + 0.25, w: 2.1, h: 2.3, sizing: { type: 'contain', w: 2.1, h: 2.3 } });
+       });
+       n++;
++      parts.forEach(part => {
++        if (parts.length > 1 && part.group) {
++          // group divider, e.g. "TEVEO · Accessories"
++          const gd = pptx.addSlide();
++          gd.background = { color: C.mist };
++          gd.addText(`${sel.brand} ${g.series}`.toUpperCase(), { x: 0.8, y: 2.6, w: 8, h: 0.35, fontFace: FONT, fontSize: 12, bold: true, color: C.accent, charSpacing: 3, margin: 0 });
++          gd.addText(part.group, { x: 0.8, y: 3.0, w: 11, h: 0.9, fontFace: HFONT, fontSize: 40, color: C.ink, margin: 0 });
++          gd.addText([...new Set(part.products.map(p => p.category))].join('   ·   ') + `   ·   ${part.products.length} products`, { x: 0.8, y: 3.95, w: 11.5, h: 0.5, fontFace: FONT, fontSize: 14, color: C.sub, margin: 0 });
++          n++;
++        }
+       if (sel.layout === 'grid') {
+-        // overview: 6 per slide, grouped by category
++        // overview: up to 6 per slide; each category starts on its own slide
+         const per = 6;
+-        const list = g.products;
+-        for (let p = 0; p < Math.ceil(list.length / per); p++) {
++        const byCat = [];
++        part.products.forEach(p => { let e = byCat.find(x => x.cat === p.category); if (!e) byCat.push(e = { cat: p.category, list: [] }); e.list.push(p); });
++        byCat.forEach(({ cat, list }) => { for (let p = 0; p < Math.ceil(list.length / per); p++) {
+           const s = pptx.addSlide();
+           const chunk = list.slice(p * per, p * per + per);
+-          const cats = [...new Set(chunk.map(x => x.category))];
+-          header(s, `${sel.brand} ${g.series}`, cats.join(' · '));
++          header(s, `${sel.brand} ${g.series}${part.group ? '  ·  ' + part.group : ''}`, cat + (p ? ' (continued)' : ''));
+           const cw = 3.98, ch = 2.62, gx = 0.18, gy = 0.2;
+           chunk.forEach((pr, i) => {
+             const cx = 0.5 + (i % 3) * (cw + gx), cy = 1.55 + Math.floor(i / 3) * (ch + gy);
+@@ -204,13 +234,13 @@
+               { text: pr.keySpecs.slice(0, 3).join('\n'), options: { fontSize: 9, color: C.sub, breakLine: true } },
+               { text: 'Art. ' + base.art + (pr.variants.length > 1 ? `  +${pr.variants.length - 1} finishes` : ''), options: { fontSize: 9, color: C.sub } }
+             ], { x: cx + 1.82, y: cy + 0.15, w: cw - 1.95, h: ch - 0.75, fontFace: FONT, valign: 'top', margin: 0, paraSpaceAfter: 3 });
+-            pr.variants.forEach((v, k) => swatch(s, v.finish_key, cx + 1.82 + k * 0.27, cy + ch - 0.5, 0.2));
++            [...new Set(pr.variants.map(v => v.finish_key))].forEach((k2, k) => swatch(s, k2, cx + 1.82 + k * 0.27, cy + ch - 0.5, 0.2));
+             if (sel.showPrices) s.addText('from ' + money(minP), { x: cx + 1.82, y: cy + ch - 0.32, w: cw - 1.95, h: 0.24, fontFace: FONT, fontSize: 10, bold: true, color: C.ink, align: 'right', margin: 0 });
+           });
+           footer(s, foot, n++);
+-        }
++        } });
+       } else {
+-        g.products.forEach(pr => {
++        part.products.forEach(pr => {
+           const s = pptx.addSlide();
+           s.addShape('rect', { x: 0, y: 0, w: 5.2, h: 7.0, fill: { color: C.mist }, line: { color: C.mist } });
+           pic(s, img(pr.image), { x: 0.6, y: 0.8, w: 4.0, h: 5.4, sizing: { type: 'contain', w: 4.0, h: 5.4 } });
+@@ -235,6 +265,7 @@
+           footer(s, foot, n++);
+         });
+       }
++      });
+     });
+     // closing
+     const s = pptx.addSlide();
+diff --git a/static/js/engine.js b/static/js/engine.js
+index b8bc6c8..87e8675 100644
+--- a/static/js/engine.js
++++ b/static/js/engine.js
+@@ -14,6 +14,10 @@
+     const FIN = meta.finishes;
+     const TYPE_LABEL = Object.fromEntries(meta.types.map(t => [t.key, t.label]));
+     const CAT_ORDER = meta.categories;
++    const GROUP_OF = Object.fromEntries((meta.groups || []).flatMap(g => g.categories.map(c => [c, g.name])));
++    const groupOf = c => GROUP_OF[c] || '';
++    const catRank = c => { const i = CAT_ORDER.indexOf(c); return i < 0 ? 999 : i; };
++    const sortItems = items => items.map((it, i) => [it, i]).sort((a, b) => catRank(a[0].category) - catRank(b[0].category) || a[1] - b[1]).map(x => x[0]);
+     const byId = Object.fromEntries(P.map(p => [p.id, p]));
+     const find = (brand, series, type) => P.find(p => p.brand === brand && p.series === series && p.type === type);
+     const finishLabel = k => (FIN.find(f => f.key === k) || {}).label || k;
+@@ -113,7 +117,7 @@
+         if (m) { m.qty += it.qty; if (it.why && !m.why.includes(it.why)) m.why = m.why ? m.why + '; ' + it.why : it.why; }
+         else merged.push(it);
+       });
+-      return { items: merged, warnings: [...new Set(warn)] };
++      return { items: sortItems(merged), warnings: [...new Set(warn)] };
+     }
+     function alternatives(it) {
+       const cur = byId[it.pid];
+@@ -128,7 +132,7 @@
+       if (!brand) return [];
+       return o.series.map(s => {
+         const prods = P.filter(p => p.brand === o.brand && p.series === s && o.categories.includes(p.category) && !(o.exclude || []).includes(p.id))
+-          .sort((a, b) => CAT_ORDER.indexOf(a.category) - CAT_ORDER.indexOf(b.category))
++          .map((p, i) => [p, i]).sort((a, b) => catRank(a[0].category) - catRank(b[0].category) || a[1] - b[1]).map(x => x[0])
+           .map(p => {
+             const vs = p.variants.filter(v => o.finishes.includes(v.finish_key));
+             return {
+@@ -143,7 +147,7 @@
+         return { series: s, style: meta2 ? meta2.style : '', products: prods, finishes: order.map(k => ({ key: k, short: finishLabel(k) })) };
+       }).filter(g => g.products.length);
+     }
+-    return { buildRoom, alternatives, swap, refinish, item, byId, find, finishLabel, rangeGroups, brandOf, CAT_ORDER, FIN };
++    return { buildRoom, alternatives, swap, refinish, item, byId, find, finishLabel, rangeGroups, brandOf, groupOf, sortItems, CAT_ORDER, FIN };
+   }
+   const api = { make, ROOM_PRESETS };
+   if (typeof module !== 'undefined' && module.exports) module.exports = api; else root.Engine = api;
+diff --git a/tests/test_app.py b/tests/test_app.py
+index b1fa819..28f96f1 100644
+--- a/tests/test_app.py
++++ b/tests/test_app.py
+@@ -50,8 +50,8 @@ def test_excel_flow_and_roles(admin):
+     # fill the template with two products
+     wb = load_workbook(io.BytesIO(admin.get("/api/template.xlsx").content))
+     ws = wb["Products"]
+-    ws.append(["AURA", "Shower", "shower_exposed", "Wall shower mixer", "Flow rate: 12 l/min", "AU-100-CH", "Chrome", "", 120, ""])
+-    ws.append(["AURA", "Shower", "shower_exposed", "Wall shower mixer", "", "AU-100-BK", "Matt black", "", 150, ""])
++    ws.append(["AURA", "shower_exposed", "Wall shower mixer", "Flow rate: 12 l/min", "AU-100-CH", "Chrome", "", 120, ""])
++    ws.append(["AURA", "shower_exposed", "Wall shower mixer", "", "AU-100-BK", "Matt black", "", 150, ""])
+     buf = io.BytesIO()
+     wb.save(buf)
+     r = admin.post("/api/catalogs", data={"brand": "Aura Test", "currency": "INR"},
+@@ -62,6 +62,7 @@ def test_excel_flow_and_roles(admin):
+     names = {p["name"]: p for p in d["products"]}
+     assert len(names["Wall shower mixer"]["variants"]) == 2
+     assert names["Wall shower mixer"]["variants"][1]["finish_key"] == "black"
++    assert names["Wall shower mixer"]["category"] == "Shower mixers"
+ 
+     # sales user can't see unpublished catalogs or admin endpoints
+     assert admin.post("/api/users", json={"email": "sam@shop.in", "name": "Sam", "password": "salespass1"}).status_code == 200
+@@ -102,3 +103,15 @@ def test_deactivated_user_cannot_sign_in(admin):
+     admin.patch(f"/api/users/{uid}", json={"active": False})
+     with TestClient(app) as c:
+         assert c.post("/api/login", json={"email": "kim@shop.in", "password": "salespass2"}).status_code == 401
++
++
++def test_categories_follow_type(admin):
++    from app import db
++    from app.taxonomy import CATEGORIES, sync_categories
++    meta = admin.get("/api/meta").json()
++    assert [g["name"] for g in meta["groups"]][:2] == ["Main products", "Accessories"]
++    with db.connect() as c:  # a database from the earlier version, with the old category names
++        c.execute("UPDATE products SET category='Hand & head showers'")
++        sync_categories(c)
++        cats = {r["category"] for r in db.rows(c, "SELECT category FROM products")}
++    assert cats <= set(CATEGORIES)
+-- 
+2.43.0
+

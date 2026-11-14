@@ -42,6 +42,7 @@ class Profile:
     format_art: object = None  # function(code) -> display string
     finish_codes: dict = field(default_factory=dict)  # finish code -> finish text, used by the review checks
     keep_numbers_in_finish: tuple = ("500", "650")  # numbers allowed between article no. and price (e.g. widths)
+    check_article_prefix: bool = True  # flag article numbers whose first groups differ from the product's other rows
 
 
 # ---------- helpers that custom readers can reuse ----------

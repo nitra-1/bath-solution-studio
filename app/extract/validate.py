@@ -15,14 +15,14 @@ def validate(products, profile=None):
             issues.append("No article numbers or prices found.")
         if not p.get("image"):
             issues.append("No product photo. Upload one on the review screen.")
-        if p.get("type") == "other":
+        if p.get("type") == "other" and not p.get("attributes", {}).get("no_fitting_type"):  # reader says: not a fitting
             issues.append("Type not recognised. Set the type so the solution builder can use this product.")
         vs = p["variants"]
         for v in vs:
             v["flags"] = [f for f in v.get("flags", []) if f.startswith("Admin:")]
         # prefix consistency (spaced numeric article numbers)
         spaced = [v for v in vs if " " in v["art"] and v["art"].replace(" ", "").isdigit()]
-        if len(spaced) >= 3:
+        if len(spaced) >= 3 and getattr(profile, "check_article_prefix", True):
             pref = Counter(v["art"][:6] for v in spaced).most_common(1)[0][0]
             for v in spaced:
                 if v["art"][:6] != pref:
