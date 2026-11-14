@@ -103,20 +103,50 @@ def now():
     return datetime.now().strftime("%Y-%m-%d %H:%M")
 
 
-def save_customer(c, customer, customer_id):
-    """Update the chosen customer, else reuse one with the same phone number, else add a new one."""
+def _same(a, b, key):
+    """Two customer values say the same thing (ignoring case, spacing and phone punctuation)."""
+    if key == "phone":
+        return digits(a)[-10:] == digits(b)[-10:]   # "+91 98220 11111" is the same number as "9822011111"
+    return " ".join((a or "").split()).lower() == " ".join((b or "").split()).lower()
+
+
+def save_customer(c, customer, customer_id, u):
+    """Return the customer id for a quotation and the customer details to keep with it.
+
+    Uses the chosen customer, else one with the same phone number, else adds a new one.
+    Admins can change an existing customer's details. Salespeople can only fill in details
+    that are still blank: changing a saved name, phone, address or email is refused, so a
+    typo on one quotation can't overwrite the customer for everyone.
+    """
     d = digits(customer["phone"])
-    if customer_id and db.row(c, "SELECT id FROM customers WHERE id=?", customer_id):
+    picked = bool(customer_id and db.row(c, "SELECT id FROM customers WHERE id=?", customer_id))
+    if picked:
         cid = customer_id
     else:
         found = db.row(c, "SELECT id FROM customers WHERE phone_digits=?", d) if len(d) >= 6 else None
         cid = found["id"] if found else None
-    if cid:
-        c.execute("UPDATE customers SET name=?,address=?,phone=?,phone_digits=?,email=? WHERE id=?",
-                  (customer["name"], customer["address"], customer["phone"], d, customer["email"], cid))
-        return cid
-    return c.execute("INSERT INTO customers(name,address,phone,phone_digits,email) VALUES(?,?,?,?,?)",
-                     (customer["name"], customer["address"], customer["phone"], d, customer["email"])).lastrowid
+    if not cid:
+        cid = c.execute("INSERT INTO customers(name,address,phone,phone_digits,email) VALUES(?,?,?,?,?)",
+                        (customer["name"], customer["address"], customer["phone"], d, customer["email"])).lastrowid
+        return cid, dict(customer)
+    old = db.row(c, "SELECT * FROM customers WHERE id=?", cid)
+    if u["role"] == "admin":
+        merged = dict(customer)
+    else:
+        changed = [k for k in FIELDS if old[k] and not _same(old[k], customer[k], k)]
+        if changed:
+            if picked:
+                raise HTTPException(403, f"Only an admin can change an existing customer's details ({', '.join(changed)}). "
+                                         "Ask an admin, or use a different customer.")
+            raise HTTPException(409, f"The phone number {customer['phone']} belongs to existing customer {old['name']}. "
+                                     "Pick them from the suggestions, or check the phone number.")
+        merged = {k: old[k] or customer[k] for k in FIELDS}   # fill in blanks only
+    c.execute("UPDATE customers SET name=?,address=?,phone=?,phone_digits=?,email=? WHERE id=?",
+              (merged["name"], merged["address"], merged["phone"], digits(merged["phone"]), merged["email"], cid))
+    return cid, merged
+
+
+FIELDS = ("name", "phone", "address", "email")
 
 
 def _own(c, qid, u):
@@ -185,7 +215,7 @@ def list_quotations(q: str = "", customer_id: int | None = None, u=Depends(auth.
 def create_quotation(body: QuoteIn, u=Depends(auth.current_user)):
     customer, data = clean(body)
     with db.connect() as c:
-        cid = save_customer(c, customer, body.customer_id)
+        cid, data["customer"] = save_customer(c, customer, body.customer_id, u)
         t = now()
         qid = c.execute("INSERT INTO quotations(customer_id,owner_id,rev,total,created_at,updated_at) VALUES(?,?,1,?,?,?)",
                         (cid, u["id"], data["total"], t, t)).lastrowid
@@ -207,7 +237,7 @@ def save_revision(qid: int, body: QuoteIn, u=Depends(auth.current_user)):
         q = _own(c, qid, u)
         if body.latest_seen is not None and body.latest_seen != q["rev"]:
             raise HTTPException(409, f"Revision {q['rev']} was saved by someone else while you were editing. Reopen the quotation to see it.")
-        cid = save_customer(c, customer, q["customer_id"])
+        cid, data["customer"] = save_customer(c, customer, q["customer_id"], u)
         rev, t = q["rev"] + 1, now()
         c.execute("UPDATE quotations SET customer_id=?, rev=?, total=?, updated_at=? WHERE id=?", (cid, rev, data["total"], t, qid))
         c.execute("INSERT INTO quotation_revisions(quotation_id,rev,data,saved_by,saved_at) VALUES(?,?,?,?,?)", (qid, rev, json.dumps(data), u["id"], t))

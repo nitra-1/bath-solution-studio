@@ -423,11 +423,11 @@ function recalc(l, by) {  // same rules as the server (app/quotes.py calc_line)
 }
 function newQuote(c) {
   S.q = { id: null, number: '', rev: 0, latest: 0, customer_id: c ? c.id : null, name: c ? c.name : '', address: c ? c.address : '', phone: c ? c.phone : '', email: c ? c.email : '',
-          notes: '', lines: [blankLine()], revisions: [], dirty: false, saved_at: '', msg: '' };
+          notes: '', lines: [blankLine()], revisions: [], dirty: false, saved_at: '', msg: '', cust: c ? { ...c } : null };
 }
 function loadQuote(d) {
-  const c = d.data.customer;
-  S.q = { id: d.id, number: d.number, rev: d.rev, latest: d.latest, customer_id: d.customer_id, name: c.name, address: c.address, phone: c.phone, email: c.email, notes: d.data.notes || '',
+  const c = d.customer_now || d.data.customer;   // the customer record as it is now
+  S.q = { cust: { id: d.customer_id, ...c }, id: d.id, number: d.number, rev: d.rev, latest: d.latest, customer_id: d.customer_id, name: c.name, address: c.address, phone: c.phone, email: c.email, notes: d.data.notes || '',
           lines: d.data.lines.map(l => ({ ...l, k: ++qKey })), revisions: d.revisions, dirty: false, saved_at: d.saved_at, msg: '' };
   if (!S.q.lines.length) S.q.lines.push(blankLine());
 }
@@ -466,7 +466,15 @@ function qRow(l, i) {
     <td><input type="text" inputmode="decimal" class="num" data-qf="final" data-k="${l.k}" value="${fixed(l.final)}" aria-label="Final cost"></td>
     <td><button class="x btn ghost" type="button" data-act="qdel" data-k="${l.k}" aria-label="Remove row">✕</button></td></tr>`;
 }
+/* Salespeople can't change a saved customer's details (only fill in blank ones); admins can. */
+const custLocked = Q => !isAdmin() && !!Q.customer_id && !!Q.cust;
+function custNote(Q) {
+  if (!Q.customer_id) return 'New customer. Start typing a name or phone to pick an existing one.';
+  if (isAdmin()) return 'Existing customer. Changing these details updates the customer record for everyone.';
+  return 'Existing customer. Only an admin can change saved details; blank ones can be filled in.';
+}
 function renderQuote() {
+  const ro = f => custLocked(S.q) && S.q.cust[f] ? ' readonly title="Only an admin can change this customer detail."' : '';
   const Q = S.q, y = window.scrollY, old = Q.rev && Q.rev !== Q.latest;
   $('#main').innerHTML = `<div class="row" style="justify-content:space-between;align-items:flex-start">
       <div><a href="#/quotes" class="small">← All quotations</a><h1 style="margin-top:4px">${Q.id ? 'Quotation ' + esc(Q.number) : 'New quotation'}</h1>
@@ -475,11 +483,12 @@ function renderQuote() {
       ${Q.revisions.length ? `<label class="field qrevf"><span>Revision</span><select id="q-rev" data-qrev="1" style="width:auto">${Q.revisions.map(r => `<option value="${r.rev}" ${r.rev === Q.rev ? 'selected' : ''}>Rev ${r.rev}${r.rev === Q.latest ? ' (latest)' : ''} · ${esc(r.saved_at)} · ${esc(r.saved_by || '')} · ${inr(r.total)}</option>`).join('')}</select></label>` : ''}</div></div>
     ${old ? `<div class="warns" style="margin-top:12px"><p>You are looking at revision ${Q.rev}. Saving will create revision ${Q.latest + 1} from what you see here; revision ${Q.latest} stays in the list.</p></div>` : ''}
     <section class="card" style="margin-top:16px"><div class="proj">
-      <label class="field"><span>Customer name</span><input type="text" id="qc-name" data-qc="name" value="${esc(Q.name)}" autocomplete="off"></label>
-      <label class="field"><span>Phone</span><input type="text" id="qc-phone" data-qc="phone" value="${esc(Q.phone)}" inputmode="tel" autocomplete="off"></label>
-      <label class="field"><span>Address</span><input type="text" id="qc-address" data-qc="address" value="${esc(Q.address)}" autocomplete="off"></label>
-      <label class="field"><span>Email (to send the quotation)</span><input type="text" id="qc-email" data-qc="email" value="${esc(Q.email)}" inputmode="email" autocomplete="off"></label></div>
-      <div id="q-prev" class="muted small" style="padding:0 16px 12px">${Q.id ? 'Changing these details updates the customer record.' : 'Start typing a name or phone to pick an existing customer.'}</div></section>
+      <label class="field"><span>Customer name</span><input type="text" id="qc-name" data-qc="name" value="${esc(Q.name)}" autocomplete="off"${ro('name')}></label>
+      <label class="field"><span>Phone</span><input type="text" id="qc-phone" data-qc="phone" value="${esc(Q.phone)}" inputmode="tel" autocomplete="off"${ro('phone')}></label>
+      <label class="field"><span>Address</span><input type="text" id="qc-address" data-qc="address" value="${esc(Q.address)}" autocomplete="off"${ro('address')}></label>
+      <label class="field"><span>Email (to send the quotation)</span><input type="text" id="qc-email" data-qc="email" value="${esc(Q.email)}" inputmode="email" autocomplete="off"${ro('email')}></label></div>
+      <div class="row muted small" style="padding:0 16px 12px;gap:10px"><span>${custNote(Q)}</span><span id="q-prev"></span>
+        ${custLocked(Q) && !Q.id ? '<button class="btn ghost" type="button" data-act="qnocust">Use a different customer</button>' : ''}</div></section>
     <section class="card" style="margin-top:16px"><div class="tbl"><table class="qt"><thead><tr><th>#</th><th style="min-width:130px">Material code</th><th style="min-width:260px">Product title</th><th class="num" style="width:70px">Qty</th><th class="num" style="width:120px">MRP (₹)</th><th class="num" style="width:90px">Discount %</th><th class="num" style="width:130px">Final cost (₹)</th><th></th></tr></thead>
       <tbody id="q-body">${Q.lines.map(qRow).join('')}</tbody>
       <tfoot><tr><td colspan="6" class="num"><b>Total</b></td><td class="num"><b id="q-total">${inr(qTotal())}</b></td><td></td></tr></tfoot></table></div>
@@ -516,7 +525,7 @@ function quoteInput(t) {
   const d = t.dataset;
   if (d.qc) {
     S.q[d.qc] = t.value; qDirty();
-    if ((d.qc === 'name' || d.qc === 'phone') && !S.q.id) { S.q.customer_id = null; clearTimeout(S.qt); S.qt = setTimeout(() => suggestCustomers(t), 250); }
+    if ((d.qc === 'name' || d.qc === 'phone') && !S.q.id && !custLocked(S.q)) { S.q.customer_id = null; S.q.cust = null; clearTimeout(S.qt); S.qt = setTimeout(() => suggestCustomers(t), 250); }
     return;
   }
   const l = qLine(d.k); if (!l) return;
@@ -573,9 +582,9 @@ async function pickSug(i) {
     S.q.dirty = true; renderQuote();
     const q = document.querySelector(`[data-k="${l.k}"][data-qf="qty"]`); if (q) q.select();
   } else {
-    const c = g.items[i]; Object.assign(S.q, { customer_id: c.id, name: c.name, address: c.address, phone: c.phone, email: c.email, dirty: true });
+    const c = g.items[i]; Object.assign(S.q, { customer_id: c.id, cust: { ...c }, name: c.name, address: c.address, phone: c.phone, email: c.email, dirty: true });
     renderQuote();
-    api('GET', '/api/quotations?customer_id=' + c.id).then(l => { const el = $('#q-prev'); if (el) el.innerHTML = l.length ? `Existing customer · earlier quotations: ${l.slice(0, 6).map(x => `<a href="#/quote/${x.id}">${esc(x.number)}</a>`).join(', ')}` : 'Existing customer · no earlier quotations.'; });
+    api('GET', '/api/quotations?customer_id=' + c.id).then(l => { const el = $('#q-prev'); if (el) el.innerHTML = l.length ? `Earlier quotations: ${l.slice(0, 6).map(x => `<a href="#/quote/${x.id}">${esc(x.number)}</a>`).join(', ')}` : 'No earlier quotations.'; });
   }
 }
 function sugKey(e) {
@@ -624,6 +633,7 @@ async function quoteAct(a, t) {
   if (a === 'qadd') { Q.lines.push(blankLine()); renderQuote(); const l = Q.lines[Q.lines.length - 1]; const el = document.querySelector(`[data-k="${l.k}"][data-qf="code"]`); if (el) el.focus(); }
   else if (a === 'qdel') { Q.lines = Q.lines.filter(l => l.k !== +t.dataset.k); if (!Q.lines.length) Q.lines.push(blankLine()); Q.dirty = true; renderQuote(); }
   else if (a === 'qsave') await saveQuote();
+  else if (a === 'qnocust') { Object.assign(Q, { customer_id: null, cust: null, name: '', phone: '', address: '', email: '', dirty: true }); renderQuote(); const el = $('#qc-name'); if (el) el.focus(); }
   else if (a === 'qcancel') {
     if (Q.dirty && !confirm(Q.id ? 'Cancel without saving?\n\nThe changes you made since the last save will be lost.' : 'Cancel without saving?\n\nEverything you entered in this quotation will be lost.')) return;
     Q.dirty = false; location.hash = '#/quotes';

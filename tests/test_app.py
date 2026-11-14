@@ -185,6 +185,35 @@ def test_quotations_are_private_to_their_owner(admin):
     assert mine["id"] in [x["id"] for x in admin.get("/api/quotations").json()]   # admin sees all
 
 
+def test_sales_cannot_change_a_saved_customer(admin):
+    """A salesperson picks existing customers but can't overwrite their details; an admin can."""
+    admin.post("/api/users", json={"email": "seller@shop.in", "name": "Seller", "role": "sales", "password": "longpassword"})
+    base = admin.post("/api/quotations", json={"name": "Mrs Rao", "phone": "98111 22222", "address": "", "lines": [line("A", "B", 1, 10)]}).json()
+    cid = base["customer_id"]
+    with TestClient(app) as sales:
+        assert sales.post("/api/login", json={"email": "seller@shop.in", "password": "longpassword"}).status_code == 200
+        pick = {"customer_id": cid, "name": "Mrs Rao", "phone": "+91 9811122222", "lines": [line("A", "B", 1, 10)]}
+        # same details (any phone format) and a blank address filled in: fine
+        r = sales.post("/api/quotations", json={**pick, "address": "Baner, Pune"})
+        assert r.status_code == 200, r.text
+        assert r.json()["customer_id"] == cid and r.json()["customer_now"]["address"] == "Baner, Pune"
+        # changing a saved detail is refused, and nothing changes
+        r = sales.post("/api/quotations", json={**pick, "name": "Mrs Rao (typo)"})
+        assert r.status_code == 403 and "Only an admin" in r.json()["error"]
+        mine = sales.get("/api/quotations").json()[0]["id"]
+        assert sales.put(f"/api/quotations/{mine}", json={**pick, "address": "Somewhere else"}).status_code == 403
+        # a new entry with someone else's phone number is refused instead of overwriting them
+        r = sales.post("/api/quotations", json={"name": "Mr Other", "phone": "9811122222", "lines": [line("A", "B", 1, 10)]})
+        assert r.status_code == 409 and "Mrs Rao" in r.json()["error"]
+        # a new customer is added as before
+        assert sales.post("/api/quotations", json={"name": "Brand New", "phone": "9700000001", "lines": [line("A", "B", 1, 10)]}).status_code == 200
+    now = admin.get(f"/api/quotations/{base['id']}").json()["customer_now"]
+    assert now["name"] == "Mrs Rao" and now["address"] == "Baner, Pune"
+    # an admin can correct the customer
+    r = admin.put(f"/api/quotations/{base['id']}", json={**pick, "name": "Mrs S. Rao", "address": "Aundh, Pune"})
+    assert r.status_code == 200 and r.json()["customer_now"]["name"] == "Mrs S. Rao" and r.json()["data"]["customer"]["address"] == "Aundh, Pune"
+
+
 def test_index_links_carry_a_version(admin):
     """Script and style links get ?v=<file date>, so an updated copy never runs stale cached code."""
     import re
